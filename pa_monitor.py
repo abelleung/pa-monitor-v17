@@ -1109,7 +1109,7 @@ def check_pullback_sell_signal(df, current_idx, logger, day_high=0):
     time_str = str(current['时间'])
 
     # 使用主循环传入的盘中最高价
-    if day_high <= 0:
+    if day_high is None or day_high <= 0:
         return False, {'原因': f'盘中最高价无效({day_high})'}
 
     high_diff_from_avg = day_high - avg_price  # 盘中最高点偏离均价
@@ -1363,8 +1363,8 @@ class PAMonitor:
             'max_amount_wan': 0,
             'open_price': None,
             'close_price': None,
-            'high_price': 0,
-            'low_price': 99999,
+            'high_price': None,
+            'low_price': None,
             'total_amount_wan': 0,
             'prev_close': 0,  # 昨收价，用于振幅百分比计算
             'consecutive_down_days': 0,  # v15.1: 连跌天数（用于正T约束）
@@ -1569,8 +1569,8 @@ class PAMonitor:
             'max_amount_wan': 0,
             'open_price': None,
             'close_price': None,
-            'high_price': 0,
-            'low_price': 99999,
+            'high_price': None,
+            'low_price': None,
             'total_amount_wan': 0,
             'prev_close': saved_prev_close,  # v15.1修复：保留已计算的昨收价
             'consecutive_down_days': saved_consec_down,  # v15.1修复：保留已计算的连跌天数
@@ -1642,7 +1642,7 @@ class PAMonitor:
             amount_text = f"{total_wan:.0f}万"
 
         # 实际振幅（元为单位，最高-最低）
-        if s['high_price'] > 0 and s['low_price'] < 99999:
+        if s['high_price'] is not None and s['low_price'] is not None:
             actual_amp_yuan = s['high_price'] - s['low_price']
             amp_text = f"{actual_amp_yuan:.2f}元"
         else:
@@ -1679,11 +1679,13 @@ class PAMonitor:
                 f"{eval_status}"
             )
 
+        high_display = f"{s['high_price']:.2f}" if s['high_price'] is not None else "—"
+        low_display = f"{s['low_price']:.2f}" if s['low_price'] is not None else "—"
         msg = (
             f"📊 {today_str} 监控日报\n\n"
             f"行情概况\n"
             f"开/收盘：{s['open_price'] or '—'} / {s['close_price'] or '—'}\n"
-            f"最高/最低：{s['high_price']:.2f} / {s['low_price']:.2f}\n"
+            f"最高/最低：{high_display} / {low_display}\n"
             f"振幅：{amp_text}\n"
             f"成交额：{amount_text}\n\n"
             f"策略指标峰值\n"
@@ -2339,8 +2341,14 @@ class PAMonitor:
                 self.daily_stats['max_boll_width'] = max(self.daily_stats['max_boll_width'], boll_width_val)
                 self.daily_stats['max_macd'] = max(self.daily_stats['max_macd'], macd_val)
                 self.daily_stats['max_amount_wan'] = max(self.daily_stats['max_amount_wan'], amount_val)
-                self.daily_stats['high_price'] = max(self.daily_stats['high_price'], current_high)
-                self.daily_stats['low_price'] = min(self.daily_stats['low_price'], current_low)
+                if self.daily_stats['high_price'] is None:
+                    self.daily_stats['high_price'] = current_high
+                else:
+                    self.daily_stats['high_price'] = max(self.daily_stats['high_price'], current_high)
+                if self.daily_stats['low_price'] is None:
+                    self.daily_stats['low_price'] = current_low
+                else:
+                    self.daily_stats['low_price'] = min(self.daily_stats['low_price'], current_low)
                 if self.daily_stats['open_price'] is None:
                     # v11.0: 开盘价用第一根K线的open字段
                     self.daily_stats['open_price'] = round(float(latest['开盘']), 2)
@@ -2479,7 +2487,12 @@ class PAMonitor:
                             pass  # 连跌天数超标，跳过正T
                         else:
                             # v16.1: 传入当日振幅 + BOLL带宽用于硬约束判断
-                            current_amplitude = self.daily_stats.get('high_price', 0) - self.daily_stats.get('low_price', 99999)
+                            hp = self.daily_stats.get('high_price')
+                            lp = self.daily_stats.get('low_price')
+                            if hp is None or lp is None:
+                                current_amplitude = 0
+                            else:
+                                current_amplitude = hp - lp
                             if current_amplitude > 100 or current_amplitude < 0:  # 异常值保护（过大或负数）
                                 current_amplitude = 0
                             current_boll_width = float(completed['BOLL带宽']) if not np.isnan(completed.get('BOLL带宽', np.nan)) else 0
