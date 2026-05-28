@@ -216,23 +216,23 @@ from pytdx.hq import TdxHq_API
 from pa_notify import notify
 
 # 导入增强复盘报告模块
-try:
-    # v16.1.2: 指标和策略函数已解耦到独立文件
-    from indicators import (
-        calc_indicators,
-        estimate_daily_amount_and_amplitude,
-        safe_float,
-        get_time_tuple,
-        is_trade_time,
-        _interpolate_cum_ratio,
-    )
-    from strategies import (
-        check_boll_sell_signal,
-        check_momentum_sell_signal,
-        check_zhengT_buy_signal,
-        check_pullback_sell_signal,
-    )
+# v16.1.2: 指标和策略函数已解耦到独立文件
+from indicators import (
+    calc_indicators,
+    estimate_daily_amount_and_amplitude,
+    safe_float,
+    get_time_tuple,
+    is_trade_time,
+    _interpolate_cum_ratio,
+)
+from strategies import (
+    check_boll_sell_signal,
+    check_momentum_sell_signal,
+    check_zhengT_buy_signal,
+    check_pullback_sell_signal,
+)
 
+try:
     from daily_report_enhanced import generate_enhanced_report
     ENHANCED_REPORT_AVAILABLE = True
 except ImportError:
@@ -247,6 +247,23 @@ DATA_DIR = PROJECT_DIR / "monitor_data"
 
 # 信号历史记录文件（API服务器读取）
 SIGNAL_HISTORY_FILE = DATA_DIR / "signal_history.json"
+
+# 从 indicators 导入策略参数配置（集中管理，支持配置文件覆盖）
+from indicators import STRATEGY_CONFIG
+
+# 通达信服务器列表
+TDX_SERVERS = [
+    ('180.153.18.170', 7709),
+    ('119.147.212.81', 7709),
+    ('112.74.214.43', 7709),
+    ('221.231.141.60', 7709),
+    ('101.227.73.20', 7709),
+    ('101.227.77.254', 7709),
+    ('14.215.128.18', 7709),
+    ('59.173.18.140', 7709),
+    ('47.103.48.45', 7709),
+]
+
 
 def save_signal_to_history(signal_data: dict):
     """将信号写入历史文件，供API服务器实时读取"""
@@ -334,7 +351,9 @@ def release_pid():
 
 def setup_logging():
     """配置日志系统（仅文件，不输出到stdout避免nohup双行）"""
+    print("DEBUG: setup_logging() started", flush=True)
     config = load_config()
+    print(f"DEBUG: setup_logging() config loaded: {list(config.keys()) if config else 'empty'}", flush=True)
     log_dir = Path(config.get("log_dir", str(PROJECT_DIR / "monitor_logs")))
     log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -790,6 +809,14 @@ class PAMonitor:
                 return
             # 按时间排序
             df = df.sort_values('时间').reset_index(drop=True)
+            # v16.1.2: 确保数值列类型正确（CSV可能读为字符串）
+            numeric_cols = ['开盘', '最高', '最低', '收盘', '成交量', '成交额']
+            for col in numeric_cols:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            # 预计算指标（一次性计算，后续直接切片使用）
+            self.logger.info(f"正在预计算指标（{len(df)}根K线）...")
+            df = calc_indicators(df)
             self.simulate_df = df
             self.simulate_idx = 0
             self.logger.info(f"✅ 模拟数据加载成功: {len(df)}根K线，时间范围: {df['时间'].iloc[0]} ~ {df['时间'].iloc[-1]}")
@@ -805,11 +832,10 @@ class PAMonitor:
             self.logger.info("模拟数据已播放完毕")
             return None
         # 每次推进1根K线，模拟实时行情
+        # 指标已预计算，直接切片返回
         end = self.simulate_idx + 1
         df = self.simulate_df.iloc[:end].copy().reset_index(drop=True)
         self.simulate_idx += 1
-        # 计算指标
-        df = calc_indicators(df)
         return df
 
     def is_trading_day(self):
@@ -983,11 +1009,12 @@ class PAMonitor:
         }
         self.daily_bars = []
         self.daily_report_sent = False
-        # v14.1: 重置成交额校验状态
-        self.tdx._calibration_checked_today = False
-        self.tdx._suspect_count = 0
-        self.tdx._calibration_mode = False
-        self.tdx._calibration_ratio = 1.0
+        # v14.1: 重置成交额校验状态（仅实盘模式）
+        if self.tdx:
+            self.tdx._calibration_checked_today = False
+            self.tdx._suspect_count = 0
+            self.tdx._calibration_mode = False
+            self.tdx._calibration_ratio = 1.0
         # 重置90分钟窗口极值追踪
         self.sell_window_min_price = None
         self.zhengt_window_max_price = None
@@ -1518,6 +1545,7 @@ class PAMonitor:
 
     def run(self):
         """主运行循环"""
+        print("DEBUG: run() started", flush=True)
         self.logger.info("=" * 60)
         self.logger.info("  中国平安 v16.1.2 三策略倒T+正T策略监控系统 启动")
         self.logger.info(f"  股票: {self.config.get('stock_code', '601318')} {self.config.get('stock_name', '中国平安')}")
@@ -1545,6 +1573,7 @@ class PAMonitor:
 
         # 模拟测试模式
         if self.simulate:
+            print("DEBUG: Entering simulation mode", flush=True)
             self.logger.info("⚠️  模拟测试模式已启用")
             self.logger.info(f"   数据文件: {self.simulate_csv}")
             self.logger.info(f"   播放速度: {self.simulate_speed}x")
@@ -1595,12 +1624,10 @@ class PAMonitor:
                     bar_time = str(completed['时间'])
                     self.logger.info(f"模拟K线: {bar_time} 收盘={completed['收盘']:.2f}")
 
-                    # 更新日内统计（复用现有逻辑）
-                    self._update_daily_stats(completed)
-
                     # 信号检查（复用现有逻辑）
                     total_bars = len(df)
                     if total_bars >= 5:
+                        self.logger.info(f"DEBUG: 检查信号 bar={bar_time}, 收盘={completed['收盘']:.2f}, 涨跌={completed.get('涨跌', 0):.1f}, 风险={completed.get('风险', 0):.1f}")
                         self._check_daot_signals(df, completed, total_bars)
                         self._check_zhengt_signals(df, completed, total_bars)
                         self.check_buyback_and_stoploss(completed['收盘'], bar_time, total_bars)

@@ -5,7 +5,67 @@
 """
 import numpy as np
 import pandas as pd
-from pa_monitor import STRATEGY_CONFIG
+
+# ==================== 策略参数配置（集中管理，支持配置文件覆盖）====================
+# v16.1.2: 所有策略常量集中到此字典，从 monitor_config.json 的 strategy 节可覆盖
+STRATEGY_CONFIG = {
+    # v14.0 BOLL上轨补充策略参数（降级为补充策略）
+    'BOLL_AMOUNT_THRESH_WAN': 3000,
+    'BOLL_MA_ABOVE': 0.10,
+    'BOLL_MACD_THRESH': 0.06,
+    'BOLL_DEVIATION_THRESH': 0.3,
+    'BOLL_TOUCH_RATIO': 0.995,
+
+    # 低波动日备用策略参数（冲高回落）
+    'PULLBACK_AMOUNT_THRESH_WAN': 3000,
+    'PULLBACK_DAY_HIGH_DEVIATION': 0.20,
+    'PULLBACK_PULLBACK_FROM_HIGH': 0.20,
+    'PULLBACK_CLOSE_ABOVE_AVG': 0.20,
+    'PULLBACK_START': (9, 40),
+    'PULLBACK_END': (13, 30),
+    'PULLBACK_BANDWIDTH_THRESH': 1.5,
+
+    # v14.0 动量策略参数（主力策略）
+    'ZHANGDIE_THRESH': 100,
+    'FENGXIAN_THRESH': 85,
+    'AMOUNT_THRESH_WAN': 3000,
+    'MA_ABOVE': 0.10,
+    'MACD_BAR_THRESH': 0.06,
+
+    # 正T策略参数（买入）
+    'ZHENGT_MA_BELOW': 0.40,
+    'ZHENGT_RISK_THRESH': 10,
+    'ZHENGT_AMOUNT_THRESH_WAN': 5000,
+    'ZHENGT_ZD_THRESH': 0,
+    'ZHENGT_MIN_AMPLITUDE': 0.80,
+    'ZHENGT_MIN_BOLL_WIDTH': 1.0,
+    'ZHENGT_LATEST_HOUR': 14,
+    'ZHENGT_MAX_CONSEC_DOWN': 2,
+    'ZHENGT_TARGET_DIFF': 0.20,
+    'ZHENGT_STOP_LOSS_DIFF': 0.15,
+
+    # 共用参数
+    'TRADE_START': (9, 40),
+    'TRADE_END': (14, 30),
+    'COOLDOWN_BARS': 30,
+    'EVAL_WINDOW_BARS': 90,
+    'WARMUP_BARS': 350,
+
+    # 动态目标差价 & 止损差价
+    'TARGET_DIFF_LOW_VOLUME': 0.30,
+    'STOP_LOSS_DIFF_LOW_VOLUME': 0.20,
+    'TARGET_DIFF_NORMAL': 0.40,
+    'STOP_LOSS_DIFF_NORMAL': 0.30,
+    'TARGET_DIFF': 0.30,  # 默认使用缩量参数
+    'STOP_LOSS_DIFF': 0.20,  # 默认使用缩量参数
+
+    # 成交额预测 & 振幅预估参数
+    'AMP_SLOPE': 0.0178,
+    'AMP_INTERCEPT': 0.47,
+    'VOLUME_LOW_LINE': 3000,
+    'EXTREME_LOW_LINE': 1250,
+    'EXTREME_LOW_TARGET': 0.15,
+}
 
 # CUM_RATIO_TABLE (moved from pa_monitor.py)
 CUM_RATIO_TABLE = {
@@ -68,18 +128,21 @@ def hhv(arr, period):
     return result
 
 
-def sma_wilder(arr, period, weight):
+def sma_wilder(series, period, weight):
     """Wilders 平滑（通达信标准）"""
-    n = len(arr)
+    n = len(series)
     result = np.full(n, np.nan)
-    if n >= period:
-        result[period - 1] = np.mean(arr[:period])
-        for i in range(period, n):
-            result[i] = (result[i - 1] * (period - weight) + arr[i] * weight) / period
+    for i in range(n):
+        if np.isnan(series[i]):
+            continue
+        if i == 0 or np.isnan(result[i - 1]):
+            result[i] = series[i]
+        else:
+            result[i] = (result[i - 1] * (period - weight) + series[i] * weight) / period
     return result
 
 
-def ma_simple(arr, period, weight):
+def ma_simple(arr, period):
     """简单移动平均（SMA）"""
     n = len(arr)
     result = np.full(n, np.nan)
@@ -92,10 +155,13 @@ def ema(arr, period):
     """指数移动平均（EMA）"""
     n = len(arr)
     result = np.full(n, np.nan)
-    if n >= period:
-        result[period - 1] = np.mean(arr[:period])
-        alpha = 2.0 / (period + 1)
-        for i in range(period, n):
+    for i in range(n):
+        if np.isnan(arr[i]):
+            continue
+        if i == 0 or np.isnan(result[i - 1]):
+            result[i] = arr[i]
+        else:
+            alpha = 2.0 / (period + 1)
             result[i] = arr[i] * alpha + result[i - 1] * (1 - alpha)
     return result
 

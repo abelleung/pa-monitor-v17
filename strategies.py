@@ -3,9 +3,7 @@
 包含：BOLL上轨、动量、冲高回落、正T买入 四个策略
 """
 import numpy as np
-import numpy as np
-from indicators import safe_float, get_time_tuple
-from pa_monitor import STRATEGY_CONFIG
+from indicators import safe_float, get_time_tuple, STRATEGY_CONFIG
 
 
 def check_boll_sell_signal(row, logger):
