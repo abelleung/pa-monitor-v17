@@ -2273,7 +2273,7 @@ class PAMonitor:
                 hb_cache['price'] = float(completed['收盘'])
                 hb_cache['zd'] = float(completed['涨跌']) if not np.isnan(completed['涨跌']) else hb_cache.get('zd', 0)
                 hb_cache['fx'] = float(completed['风险']) if not np.isnan(completed['风险']) else hb_cache.get('fx', 0)
-                hb_cache['amt'] = float(completed['成交额_万'])
+                hb_cache['amt'] = float(completed['成交额_万']) if not np.isnan(completed.get('成交额_万', np.nan)) else hb_cache.get('amt', 0)
                 hb_cache['macd'] = float(completed['MACD柱']) if not np.isnan(completed.get('MACD柱', np.nan)) else hb_cache.get('macd', 0)
                 hb_cache['maimai'] = float(completed['买卖力道']) if not np.isnan(completed.get('买卖力道', np.nan)) else hb_cache.get('maimai', 0)
                 # v13.0: 增加BOLL指标缓存
