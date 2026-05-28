@@ -15,5 +15,12 @@
     
     "candlestick_enabled": true,
     "candlestick_boll_tolerance": 0.001,
-    "candlestick_comment": "蜡烛图形态识别配置。enabled: 是否启用。boll_tolerance: BOLL轨道触碰容差（默认0.1%）"
+    "candlestick_comment": "蜡烛图形态识别配置。enabled: 是否启用。boll_tolerance: BOLL轨道触碰容差（默认0.1%）",
+
+    "strategy": {
+        "comment": "策略参数覆盖（可选）。从 STRATEGY_CONFIG 字典中选取要覆盖的参数。",
+        "BOLL_AMOUNT_THRESH_WAN": 3000,
+        "PULLBACK_BANDWIDTH_THRESH": 1.5,
+        "ZHENGT_TARGET_DIFF": 0.20
+    }
 }

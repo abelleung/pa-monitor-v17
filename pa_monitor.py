@@ -29,7 +29,7 @@ v16.1 正T策略优化（2026-04-27）：
 v15.3 90分钟窗口评估机制（2026-04-25）：
   - 核心改动：止损/冷却期不再终止信号追踪，改为90分钟窗口评估信号成败
   - 止损触发后：推送改为"⚠️风险提示，仅供参考"，不再暗示"必须操作"
-  - 新增 EVAL_WINDOW_BARS=90：90分钟窗口到期后自动评估信号理论有效性
+  - 新增 STRATEGY_CONFIG['EVAL_WINDOW_BARS']=90：90分钟窗口到期后自动评估信号理论有效性
     * 倒T评估标准：窗口内最低价 < 卖出价-0.25元 → 信号成功
     * 正T评估标准：窗口内最高价 > 买入价+0.20元 → 信号成功
   - 新增窗口评估推送：90分钟到期自动推送评估结果（成功/失败）
@@ -49,7 +49,7 @@ v15.2 冷却期优化 + 成交额预估重构（2026-04-24）：
     * 新算法：全天预估 = 累计额 / 该时刻累计占比（CUM_RATIO_TABLE + 线性插值）
     * 32天回测精度提升：09:40误差76%→25%，10:30误差30%→18%，14:30误差5%→4%
   - 新增CUM_RATIO_TABLE（10个关键节点）和_interpolate_cum_ratio()函数
-  - 新交易日重置新增 self.last_signal_bar = -COOLDOWN_BARS - 1
+  - 新交易日重置新增 self.last_signal_bar = -STRATEGY_CONFIG['COOLDOWN_BARS'] - 1
 
 v15.1.2 代码审查修复（2026-04-23）：
   - P0: 冲高回落接近触发日志从/6改为/8（v15.1.1新增cond7+cond8后实际8条件）
@@ -281,122 +281,6 @@ def update_signal_status(signal_time: str, direction: str, status: str, profit: 
         logging.getLogger(__name__).error(f"更新信号状态失败: {e}")
 
 
-# v14.0 BOLL上轨补充策略参数（降级为补充策略）
-# 59天1分钟线穷举证明：BOLL带宽条件无筛选价值（0.10~0.80元区间胜率仅差1-2%）
-# v14.0去掉带宽条件，仅保留触碰上轨+量能+偏离+MACD（5条件）
-BOLL_AMOUNT_THRESH_WAN = 3000    # 成交额 ≥ 3000万
-BOLL_MA_ABOVE = 0.10             # 股价 > 日均价 + 0.1元
-BOLL_MACD_THRESH = 0.06          # MACD柱 > 0.06
-BOLL_DEVIATION_THRESH = 0.3      # 偏离日均价 > 0.3元
-BOLL_TOUCH_RATIO = 0.995         # 触碰上轨：最高价 ≥ BOLL上轨 × 0.995
-
-# ==================== 低波动日备用策略参数（冲高回落）====================
-# 适用场景：BOLL带宽<1.5%的低波动日，捕捉早盘冲高回落
-# 回测基础：2026-04-10，成功捕捉10:03高点（59.71卖出，59.33买回，差价0.38元）
-PULLBACK_AMOUNT_THRESH_WAN = 3000  # 成交额 ≥ 3000万
-PULLBACK_DAY_HIGH_DEVIATION = 0.20  # v16.0: 盘中最高点偏离均价>0.20元
-PULLBACK_PULLBACK_FROM_HIGH = 0.20  # v16.0: 从盘中最高点回落>0.20元
-PULLBACK_CLOSE_ABOVE_AVG = 0.20    # v16.0: 收盘价偏离均价>0.20元（过滤假冲高）
-PULLBACK_START = (9, 40)         # 策略启动时间
-PULLBACK_END = (13, 30)          # v16.0: 策略结束时间（扩展到下午，原11:00）
-PULLBACK_BANDWIDTH_THRESH = 1.5  # BOLL带宽阈值，低于此值启用备用策略
-
-# v14.0 动量策略参数（主力策略，恢复v10.2逻辑）
-# 回测基础：2026-01-05至2026-04-03，59天14160根K线，62信号/80.6%胜率(0.25)/均差0.517
-ZHANGDIE_THRESH = 100      # 涨跌 > 100
-FENGXIAN_THRESH = 85       # 风险 > 85
-MA_ABOVE = 0.10            # 股价 > 日均价 + 0.1元
-MACD_BAR_THRESH = 0.06     # |MACD柱| > 0.06
-
-# 正T策略共用参数
-AMOUNT_THRESH_WAN = 3000    # 成交额 ≥ 3000万（正T与倒T共用）
-
-# 正T策略参数（买入）- v16.1 极低位高胜率组合 + BOLL带宽约束
-# 回测基础：2026-01-02至2026-04-03，59天156信号→88信号（BOLL>1%过滤43%噪音）
-# 60分钟窗口：76.3%胜率，93次信号 | 90分钟窗口：83%胜率@0.20目标，88次信号
-# v16.1: 新增BOLL带宽>1%约束（胜率从72%→83%），涨跌从<0改为≤0
-# 核心逻辑：极低位深跌+活跃资金+超卖确认 → 0.20元反弹概率极高
-ZHENGT_MA_BELOW = 0.40      # 股价 < 日均价 - 0.40元（深度偏离）
-ZHENGT_RISK_THRESH = 10     # 风险 < 10（超卖确认）
-ZHENGT_AMOUNT_THRESH_WAN = 5000  # 成交额 ≥ 5000万（活跃资金筛选器）
-ZHENGT_ZD_THRESH = 0        # 涨跌 ≤ 0（当天仍在下跌或平盘）
-# 新增：日振幅硬约束
-ZHENGT_MIN_AMPLITUDE = 0.80  # 日振幅 < 0.80元 不做正T
-# v16.1新增：BOLL带宽硬约束（回测BOLL>1%时胜率从72%→83%）
-ZHENGT_MIN_BOLL_WIDTH = 1.0  # BOLL带宽 ≤ 1.0% 不做正T（极窄带宽=市场萎缩，反弹无力）
-# v15.1新增：时间硬约束 + 连跌硬约束
-ZHENGT_LATEST_HOUR = 14     # 14:00后不做正T（回测14:00后胜率仅36%）
-ZHENGT_MAX_CONSEC_DOWN = 2  # 连跌>2天（即第3天起）不做正T（回测连跌≥3天胜率骤降）
-
-TRADE_START = (9, 40)       # 09:40 开始监控（跳过开盘10分钟波动，避免虚假信号）
-TRADE_END = (14, 30)        # 14:30 截止（14:30后信号胜率极低，v11.6回测验证）
-COOLDOWN_BARS = 30          # 冷却期30根K线≈30分钟（v15.2: 60→30，配合智能冷却——信号完成/失败后立即解锁）
-EVAL_WINDOW_BARS = 90       # 90分钟窗口评估（v15.3: 止损不终止追踪，窗口到期才判定信号成败；90→120仅+1.8pp性价比拐点）
-WARMUP_BARS = 350           # 指标预热期：主力指标最长窗口27+5+5+3+5=45，实测350根确保指标稳定
-
-# ==================== 动态目标差价 & 止损差价配置 ====================
-# 根据量能环境自动调整：缩量日目标低、止损紧；非缩量日目标高、止损宽
-# 缩量判断标准：每分钟均成交额 < VOLUME_LOW_LINE (3000万)
-
-# 缩量交易日（<72亿）
-TARGET_DIFF_LOW_VOLUME = 0.30      # 目标差价 0.30元（3毛）
-STOP_LOSS_DIFF_LOW_VOLUME = 0.20   # 止损差价 0.20元（2毛）
-
-# 非缩量交易日（≥72亿）
-TARGET_DIFF_NORMAL = 0.40          # 目标差价 0.40元（4毛）
-STOP_LOSS_DIFF_NORMAL = 0.30       # 止损差价 0.30元（3毛）
-
-# 极端缩量（<30亿）- 定义见L265，此处不再重复
-
-# v15.1: 正T专用目标差价（90分钟窗口回测0.20元目标胜率91%，远高于0.30元的74.2%）
-# 正T逻辑：低位买入→反弹卖出，0.20元更现实（失败案例反弹中位数0.195元）
-ZHENGT_TARGET_DIFF = 0.20          # 正T目标差价 0.20元
-ZHENGT_STOP_LOSS_DIFF = 0.15       # 正T止损差价 0.15元
-
-# 向后兼容的默认参数（实际使用时会根据量能动态获取）
-TARGET_DIFF = TARGET_DIFF_LOW_VOLUME      # 默认使用缩量参数（保守）
-STOP_LOSS_DIFF = STOP_LOSS_DIFF_LOW_VOLUME  # 默认使用缩量参数（保守）
-
-# 成交额预测 & 振幅预估参数（基于32个交易日1分钟线统计）
-# v15.2: 累计占比法替代上午/下午分段法
-# 核心逻辑：全天预估 = 累计额 / 该时刻累计占比（线性插值）
-# 优点：①自然反映下午量能衰减 ②尾盘放量自动包含 ③无需区分上午/下午
-CUM_RATIO_TABLE = {
-    10:  0.137,   # ~09:40 开盘活跃期
-    20:  0.199,   # ~09:50
-    30:  0.261,   # ~10:00
-    60:  0.400,   # ~10:30
-    90:  0.494,   # ~11:00
-    120: 0.578,   # ~11:30 (上午收盘)
-    150: 0.677,   # ~13:30 (下午开盘30min)
-    180: 0.767,   # ~14:00
-    210: 0.859,   # ~14:30
-    240: 1.000,   # ~15:00 (收盘)
-}
-# 保留旧常量兼容（某些日志/注释可能引用）
-AM_LOW_RATIO = 57.8         # 上午成交额占全天比例（%），32天统计
-PM_LOW_RATIO = 42.2         # 下午成交额占全天比例（%）
-# 振幅映射：振幅 ≈ 0.0178 × 全天成交额(亿元) + 0.47元
-AMP_SLOPE = 0.0178
-AMP_INTERCEPT = 0.47
-# 缩量阈值
-VOLUME_LOW_LINE = 3000      # 每分钟均成交额3000万 → 全天72亿
-EXTREME_LOW_LINE = 1250     # 每分钟均成交额1250万 → 全天30亿（极端缩量）
-EXTREME_LOW_TARGET = 0.15   # 极端缩量时做T目标差价降到0.15元
-
-# 通达信服务器
-TDX_SERVERS = [
-    ('180.153.18.170', 7709),
-    ('119.147.212.81', 7709),
-    ('112.74.214.43', 7709),
-    ('221.231.141.60', 7709),
-    ('101.227.73.20', 7709),
-    ('101.227.77.254', 7709),
-    ('14.215.128.18', 7709),
-    ('59.173.18.140', 7709),
-    ('47.103.48.45', 7709),
-]
-
 # ==================== PID文件（防重复实例） ====================
 
 def acquire_pid():
@@ -471,10 +355,16 @@ def setup_logging():
 # ==================== 配置加载 ====================
 
 def load_config() -> dict:
+    """加载配置，并覆盖策略参数（如果配置文件中有 strategy 节）"""
     if not CONFIG_PATH.exists():
         return {}
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+        config = json.load(f)
+    # v16.1.2: 从配置文件覆盖策略参数
+    if 'strategy' in config:
+        STRATEGY_CONFIG.update(config['strategy'])
+        logging.getLogger(__name__).info(f"已从配置文件覆盖 {len(config['strategy'])} 个策略参数")
+    return config
 
 
 # ==================== 通达信数据获取 ====================
@@ -921,7 +811,7 @@ def get_time_tuple(time_str):
 def is_trade_time(time_str):
     """判断是否在交易窗口内 (09:40 ~ 14:30)"""
     h, m = get_time_tuple(time_str)
-    return (h, m) >= TRADE_START and (h, m) <= TRADE_END
+    return (h, m) >= STRATEGY_CONFIG['TRADE_START'] and (h, m) <= STRATEGY_CONFIG['TRADE_END']
 
 
 
@@ -963,11 +853,11 @@ def check_boll_sell_signal(row, logger):
     }
     
     # BOLL v14.0 卖出条件（5条件，移除带宽）
-    cond1 = high >= boll_upper * BOLL_TOUCH_RATIO  # 触碰BOLL上轨
-    cond2 = amount_wan >= BOLL_AMOUNT_THRESH_WAN    # 成交额≥3000万
-    cond3 = price_diff > BOLL_MA_ABOVE              # 股价>日均价+0.1
-    cond4 = price_diff > BOLL_DEVIATION_THRESH      # 偏离日均价>0.3元
-    cond5 = macd_bar > BOLL_MACD_THRESH             # MACD柱>0.06
+    cond1 = high >= boll_upper * STRATEGY_CONFIG['BOLL_TOUCH_RATIO']  # 触碰BOLL上轨
+    cond2 = amount_wan >= STRATEGY_CONFIG['BOLL_AMOUNT_THRESH_WAN']    # 成交额≥3000万
+    cond3 = price_diff > STRATEGY_CONFIG['BOLL_MA_ABOVE']              # 股价>日均价+0.1
+    cond4 = price_diff > STRATEGY_CONFIG['BOLL_DEVIATION_THRESH']      # 偏离日均价>0.3元
+    cond5 = macd_bar > STRATEGY_CONFIG['BOLL_MACD_THRESH']             # MACD柱>0.06
     
     details['满足条件'] = {
         '触碰上轨': cond1,
@@ -1017,18 +907,18 @@ def check_momentum_sell_signal(row, logger):
     }
 
     # v14.0 动量策略条件（主力）
-    cond1 = zhangdie > ZHANGDIE_THRESH
-    cond2 = fengxian > FENGXIAN_THRESH
-    cond3 = amount_wan >= AMOUNT_THRESH_WAN
-    cond4 = price_diff > MA_ABOVE
-    cond5 = macd_abs > MACD_BAR_THRESH
+    cond1 = zhangdie > STRATEGY_CONFIG['ZHANGDIE_THRESH']
+    cond2 = fengxian > STRATEGY_CONFIG['FENGXIAN_THRESH']
+    cond3 = amount_wan >= STRATEGY_CONFIG['AMOUNT_THRESH_WAN']
+    cond4 = price_diff > STRATEGY_CONFIG['MA_ABOVE']
+    cond5 = macd_abs > STRATEGY_CONFIG['MACD_BAR_THRESH']
 
     details['满足条件'] = {
-        f'涨跌>{ZHANGDIE_THRESH}': cond1,
-        f'风险>{FENGXIAN_THRESH}': cond2,
-        f'成交额≥{AMOUNT_THRESH_WAN}万': cond3,
-        f'股价>均价+{MA_ABOVE}': cond4,
-        f'|MACD柱|>{MACD_BAR_THRESH}': cond5,
+        f'涨跌>{STRATEGY_CONFIG['ZHANGDIE_THRESH']}': cond1,
+        f'风险>{STRATEGY_CONFIG['FENGXIAN_THRESH']}': cond2,
+        f'成交额≥{STRATEGY_CONFIG['AMOUNT_THRESH_WAN']}万': cond3,
+        f'股价>均价+{STRATEGY_CONFIG['MA_ABOVE']}': cond4,
+        f'|MACD柱|>{STRATEGY_CONFIG['MACD_BAR_THRESH']}': cond5,
     }
     details['全部满足'] = all([cond1, cond2, cond3, cond4, cond5])
 
@@ -1063,12 +953,12 @@ def check_zhengT_buy_signal(row, logger, amplitude=0, boll_width=0):
     }
 
     # v16.1 极低位高胜率组合（4条件 + 2硬约束）
-    cond1 = price_diff > ZHENGT_MA_BELOW           # 偏离均价 > 0.40元（深度超卖）
-    cond2 = fengxian < ZHENGT_RISK_THRESH           # 风险 < 10（超卖确认）
-    cond3 = amount_wan >= ZHENGT_AMOUNT_THRESH_WAN   # 成交额 ≥ 5000万（活跃资金）
-    cond4 = zhangdie <= ZHENGT_ZD_THRESH              # 涨跌 ≤ 0（仍在下跌或平盘）
-    cond5 = amplitude >= ZHENGT_MIN_AMPLITUDE         # 日振幅 ≥ 0.80元（有反弹空间）
-    cond6 = boll_width > ZHENGT_MIN_BOLL_WIDTH       # BOLL带宽 > 1.0%（市场有弹性，非萎缩态）
+    cond1 = price_diff > STRATEGY_CONFIG['ZHENGT_MA_BELOW']           # 偏离均价 > 0.40元（深度超卖）
+    cond2 = fengxian < STRATEGY_CONFIG['ZHENGT_RISK_THRESH']           # 风险 < 10（超卖确认）
+    cond3 = amount_wan >= STRATEGY_CONFIG['ZHENGT_AMOUNT_THRESH_WAN']   # 成交额 ≥ 5000万（活跃资金）
+    cond4 = zhangdie <= STRATEGY_CONFIG['ZHENGT_ZD_THRESH']              # 涨跌 ≤ 0（仍在下跌或平盘）
+    cond5 = amplitude >= STRATEGY_CONFIG['ZHENGT_MIN_AMPLITUDE']         # 日振幅 ≥ 0.80元（有反弹空间）
+    cond6 = boll_width > STRATEGY_CONFIG['ZHENGT_MIN_BOLL_WIDTH']       # BOLL带宽 > 1.0%（市场有弹性，非萎缩态）
 
     details['满足条件'] = [cond1, cond2, cond3, cond4, cond5, cond6]
     details['全部满足'] = all([cond1, cond2, cond3, cond4, cond5, cond6])
@@ -1142,23 +1032,23 @@ def check_pullback_sell_signal(df, current_idx, logger, day_high=0):
     
     # 时间检查
     h, m = get_time_tuple(time_str)
-    in_time_window = (PULLBACK_START <= (h, m) <= PULLBACK_END)
+    in_time_window = (STRATEGY_CONFIG['PULLBACK_START'] <= (h, m) <= STRATEGY_CONFIG['PULLBACK_END'])
     
     # v16.0 冲高回落条件（6个条件，精简重构）
-    cond1 = high_diff_from_avg > PULLBACK_DAY_HIGH_DEVIATION  # 盘中最高点偏离均价>0.20元
-    cond2 = pullback_from_high > PULLBACK_PULLBACK_FROM_HIGH   # 从最高点回落>0.20元
-    cond3 = close_diff > PULLBACK_CLOSE_ABOVE_AVG              # 收盘偏离均价>0.20元
-    cond4 = amount_wan >= PULLBACK_AMOUNT_THRESH_WAN           # 成交额≥3000万
+    cond1 = high_diff_from_avg > STRATEGY_CONFIG['PULLBACK_DAY_HIGH_DEVIATION']  # 盘中最高点偏离均价>0.20元
+    cond2 = pullback_from_high > STRATEGY_CONFIG['PULLBACK_PULLBACK_FROM_HIGH']   # 从最高点回落>0.20元
+    cond3 = close_diff > STRATEGY_CONFIG['PULLBACK_CLOSE_ABOVE_AVG']              # 收盘偏离均价>0.20元
+    cond4 = amount_wan >= STRATEGY_CONFIG['PULLBACK_AMOUNT_THRESH_WAN']           # 成交额≥3000万
     cond5 = price < boll_upper                                  # 已从BOLL上轨回落
     cond6 = in_time_window                                      # 时间窗口9:40-13:30
 
     details['满足条件'] = {
-        f'盘中最高偏离均价>{PULLBACK_DAY_HIGH_DEVIATION}({high_diff_from_avg:+.3f})': cond1,
-        f'从高点回落>{PULLBACK_PULLBACK_FROM_HIGH}({pullback_from_high:+.3f})': cond2,
-        f'收盘偏离均价>{PULLBACK_CLOSE_ABOVE_AVG}({close_diff:+.3f})': cond3,
-        f'成交额≥{PULLBACK_AMOUNT_THRESH_WAN}万({amount_wan:.0f})': cond4,
+        f'盘中最高偏离均价>{STRATEGY_CONFIG['PULLBACK_DAY_HIGH_DEVIATION']}({high_diff_from_avg:+.3f})': cond1,
+        f'从高点回落>{STRATEGY_CONFIG['PULLBACK_PULLBACK_FROM_HIGH']}({pullback_from_high:+.3f})': cond2,
+        f'收盘偏离均价>{STRATEGY_CONFIG['PULLBACK_CLOSE_ABOVE_AVG']}({close_diff:+.3f})': cond3,
+        f'成交额≥{STRATEGY_CONFIG['PULLBACK_AMOUNT_THRESH_WAN']}万({amount_wan:.0f})': cond4,
         '已从上轨回落': cond5,
-        f'在时间窗口{PULLBACK_START[0]}:{PULLBACK_START[1]:02d}-{PULLBACK_END[0]}:{PULLBACK_END[1]:02d}': cond6,
+        f'在时间窗口{STRATEGY_CONFIG['PULLBACK_START'][0]}:{STRATEGY_CONFIG['PULLBACK_START'][1]:02d}-{STRATEGY_CONFIG['PULLBACK_END'][0]}:{STRATEGY_CONFIG['PULLBACK_END'][1]:02d}': cond6,
     }
     details['全部满足'] = all([cond1, cond2, cond3, cond4, cond5, cond6])
     details['满足数量'] = sum([cond1, cond2, cond3, cond4, cond5, cond6])
@@ -1290,7 +1180,7 @@ def estimate_daily_amount_and_amplitude(df, prev_close=0, open_price=0):
     actual_amplitude = actual_high - actual_low if actual_high > 0 and actual_low < 99999 else 0
     
     # 振幅预估（基于成交额）
-    estimated_amplitude_from_volume = AMP_SLOPE * estimated_daily_yi + AMP_INTERCEPT
+    estimated_amplitude_from_volume = STRATEGY_CONFIG['AMP_SLOPE'] * estimated_daily_yi + STRATEGY_CONFIG['AMP_INTERCEPT']
     
     # 跳空修正：跳空缺口 = 开盘价 - 昨收价
     gap_amount = 0
@@ -1319,7 +1209,7 @@ def estimate_daily_amount_and_amplitude(df, prev_close=0, open_price=0):
     is_volume_low = estimated_daily_yi_val < 72  # 全天<72亿为缩量
     is_extreme_low = estimated_daily_yi_val < 30  # 全天<30亿为极端缩量
     
-    suggested_target = EXTREME_LOW_TARGET if is_extreme_low else TARGET_DIFF
+    suggested_target = STRATEGY_CONFIG['EXTREME_LOW_TARGET'] if is_extreme_low else TARGET_DIFF
     
     # 每分钟均额（用预估全天/240分钟，更合理的"等效均额"）
     equiv_per_min_wan = estimated_daily_wan / 240 if estimated_daily_wan > 0 else per_min_wan
@@ -1355,7 +1245,7 @@ class PAMonitor:
             market=self.config.get("market", 1),
             symbol=self.config.get("stock_code", "601318"),
         )
-        self.last_signal_bar = -COOLDOWN_BARS - 1
+        self.last_signal_bar = -STRATEGY_CONFIG['COOLDOWN_BARS'] - 1
         self.signal_count_today = 0
         self.running = True
         self.daily_report_sent = False  # v11.0: 防止重复发日报
@@ -1560,7 +1450,7 @@ class PAMonitor:
                 else:
                     break
             self.daily_stats['consecutive_down_days'] = streak
-            self.logger.info(f"v15.1: 连跌天数={streak}（正T约束：>{ZHENGT_MAX_CONSEC_DOWN}天不做）")
+            self.logger.info(f"v15.1: 连跌天数={streak}（正T约束：>{STRATEGY_CONFIG['ZHENGT_MAX_CONSEC_DOWN']}天不做）")
         except Exception as e:
             self.logger.warning(f"连跌天数计算失败: {e}")
 
@@ -1701,7 +1591,7 @@ class PAMonitor:
             f"策略指标峰值\n"
             f"BOLL上轨最高：{s.get('max_boll_upper', 0):.3f}\n"
             f"BOLL带宽最大：{s.get('max_boll_width', 0):.2f}元\n"
-            f"MACD柱最高：{s.get('max_macd', 0):.4f}（阈值>{BOLL_MACD_THRESH}）\n"
+            f"MACD柱最高：{s.get('max_macd', 0):.4f}（阈值>{STRATEGY_CONFIG['BOLL_MACD_THRESH']}）\n"
             f"单笔最大额：{max_amount_wan_from_klines:.0f}万\n\n"
             f"信号统计\n"
             f"倒T卖出信号：{self.signal_count_today} 次\n"
@@ -1803,7 +1693,7 @@ class PAMonitor:
             return False
 
         elapsed_bars = total_bars - signal_bar
-        if elapsed_bars < EVAL_WINDOW_BARS:
+        if elapsed_bars < STRATEGY_CONFIG['EVAL_WINDOW_BARS']:
             return False
 
         # 标记已评估
@@ -1851,10 +1741,10 @@ class PAMonitor:
         setattr(self, window_price_attr, None)
         # 智能冷却解锁
         if direction == 'sell':
-            self.last_signal_bar = total_bars - 1 - COOLDOWN_BARS
+            self.last_signal_bar = total_bars - 1 - STRATEGY_CONFIG['COOLDOWN_BARS']
             self.logger.info(f"🔓 90分钟窗口评估结束，冷却期解锁")
         else:
-            self.last_zhengt_signal_bar = total_bars - 1 - COOLDOWN_BARS
+            self.last_zhengt_signal_bar = total_bars - 1 - STRATEGY_CONFIG['COOLDOWN_BARS']
             self.logger.info(f"🔓 90分钟窗口评估结束，正T冷却期解锁")
 
         return True
@@ -1888,7 +1778,7 @@ class PAMonitor:
             update_signal_status(self.sell_time, "sell", "成功", diff * 1000)
             # v15.2 智能冷却：信号完成（回买成功），立即解锁冷却期
             if total_bars is not None:
-                self.last_signal_bar = total_bars - 1 - COOLDOWN_BARS
+                self.last_signal_bar = total_bars - 1 - STRATEGY_CONFIG['COOLDOWN_BARS']
                 self.logger.info(f"🔓 智能冷却解锁：倒T信号完成（回买成功），冷却期立即解除")
             return
 
@@ -1964,7 +1854,7 @@ class PAMonitor:
             update_signal_status(self.zhengt_buy_time, "buy", "成功", diff * 1000)
             # v15.2 智能冷却：信号完成（卖出成功），立即解锁冷却期
             if total_bars is not None:
-                self.last_zhengt_signal_bar = total_bars - 1 - COOLDOWN_BARS
+                self.last_zhengt_signal_bar = total_bars - 1 - STRATEGY_CONFIG['COOLDOWN_BARS']
                 self.logger.info(f"🔓 智能冷却解锁：正T信号完成（卖出成功），冷却期立即解除")
             return
 
@@ -2017,7 +1907,7 @@ class PAMonitor:
         返回: (triggered, details, strategy_type, is_low_volatility, momentum_details, boll_details, pullback_details)
         """
         # v16.1.2: 倒T冷却期检查
-        in_daot_cooldown = (total_bars - 1 - self.last_signal_bar) < COOLDOWN_BARS
+        in_daot_cooldown = (total_bars - 1 - self.last_signal_bar) < STRATEGY_CONFIG['COOLDOWN_BARS']
 
         if in_daot_cooldown:
             return False, None, None, False, None, None, None
@@ -2033,7 +1923,7 @@ class PAMonitor:
 
         # 策略3: 冲高回落策略（低波动日备用，仅前两个策略都未触发时检查）
         current_bandwidth = safe_float(completed['BOLL带宽'])
-        is_low_volatility = current_bandwidth < PULLBACK_BANDWIDTH_THRESH
+        is_low_volatility = current_bandwidth < STRATEGY_CONFIG['PULLBACK_BANDWIDTH_THRESH']
 
         pullback_triggered = False
         pullback_details = None
@@ -2041,7 +1931,7 @@ class PAMonitor:
             pullback_triggered, pullback_details = check_pullback_sell_signal(
                 df, total_bars - 2, self.logger, day_high=self.daily_stats['high_price'])
             if pullback_triggered:
-                self.logger.info(f"📉 低波动日启用冲高回落策略 (带宽={current_bandwidth:.2f}元 < {PULLBACK_BANDWIDTH_THRESH}元)")
+                self.logger.info(f"📉 低波动日启用冲高回落策略 (带宽={current_bandwidth:.2f}元 < {STRATEGY_CONFIG['PULLBACK_BANDWIDTH_THRESH']}元)")
 
         # 确定最终触发策略
         triggered = momentum_triggered or boll_triggered or pullback_triggered
@@ -2080,17 +1970,17 @@ class PAMonitor:
             return False, None
 
         # 正T独立冷却期
-        if (total_bars - 1 - self.last_zhengt_signal_bar) < COOLDOWN_BARS:
+        if (total_bars - 1 - self.last_zhengt_signal_bar) < STRATEGY_CONFIG['COOLDOWN_BARS']:
             return False, None
 
         # v15.1硬约束1: 14:00后不做正T（回测胜率仅36%）
         latest_time = str(completed['时间'])
         current_hour = int(latest_time[11:13]) if len(latest_time) >= 13 else 0
-        if current_hour >= ZHENGT_LATEST_HOUR:
+        if current_hour >= STRATEGY_CONFIG['ZHENGT_LATEST_HOUR']:
             return False, None
 
         # v15.1硬约束2: 连跌>2天不做正T（回测连跌≥3天胜率骤降）
-        if self.daily_stats.get('consecutive_down_days', 0) > ZHENGT_MAX_CONSEC_DOWN:
+        if self.daily_stats.get('consecutive_down_days', 0) > STRATEGY_CONFIG['ZHENGT_MAX_CONSEC_DOWN']:
             return False, None
 
         # v16.1: 传入当日振幅 + BOLL带宽用于硬约束判断
@@ -2126,25 +2016,25 @@ class PAMonitor:
         self.logger.info("  中国平安 v16.1.2 三策略倒T+正T策略监控系统 启动")
         self.logger.info(f"  股票: {self.config.get('stock_code', '601318')} {self.config.get('stock_name', '中国平安')}")
         self.logger.info("  【策略1: 动量倒T卖出】主力策略（v14.0恢复v10.2，59天回测：80.6%胜率）")
-        self.logger.info(f"    条件: 涨跌>{ZHANGDIE_THRESH} + 风险>{FENGXIAN_THRESH} + 额≥{AMOUNT_THRESH_WAN}万")
-        self.logger.info(f"           股价>均价+{MA_ABOVE} + |MACD柱|>{MACD_BAR_THRESH}")
+        self.logger.info(f"    条件: 涨跌>{STRATEGY_CONFIG['ZHANGDIE_THRESH']} + 风险>{STRATEGY_CONFIG['FENGXIAN_THRESH']} + 额≥{STRATEGY_CONFIG['AMOUNT_THRESH_WAN']}万")
+        self.logger.info(f"           股价>均价+{STRATEGY_CONFIG['MA_ABOVE']} + |MACD柱|>{STRATEGY_CONFIG['MACD_BAR_THRESH']}")
         self.logger.info("  【策略2: BOLL上轨倒T卖出】补充策略（v14.0去掉带宽条件）")
-        self.logger.info(f"    条件: 触碰BOLL上轨(≥{BOLL_TOUCH_RATIO*100:.1f}%) + 额≥{BOLL_AMOUNT_THRESH_WAN}万")
-        self.logger.info(f"           股价>均价+{BOLL_MA_ABOVE} + 偏离均价>{BOLL_DEVIATION_THRESH} + MACD柱>{BOLL_MACD_THRESH}")
+        self.logger.info(f"    条件: 触碰BOLL上轨(≥{STRATEGY_CONFIG['BOLL_TOUCH_RATIO']*100:.1f}%) + 额≥{STRATEGY_CONFIG['BOLL_AMOUNT_THRESH_WAN']}万")
+        self.logger.info(f"           股价>均价+{STRATEGY_CONFIG['BOLL_MA_ABOVE']} + 偏离均价>{STRATEGY_CONFIG['BOLL_DEVIATION_THRESH']} + MACD柱>{STRATEGY_CONFIG['BOLL_MACD_THRESH']}")
         self.logger.info("  【策略3: 冲高回落倒T卖出】低波动日备用（v16.0重构）")
-        self.logger.info(f"    适用: 低波动日(带宽<{PULLBACK_BANDWIDTH_THRESH}元)")
-        self.logger.info(f"    条件: 盘中最高偏离均价>{PULLBACK_DAY_HIGH_DEVIATION} + 从高点回落>{PULLBACK_PULLBACK_FROM_HIGH} + 收盘偏离均价>{PULLBACK_CLOSE_ABOVE_AVG} + 额≥{PULLBACK_AMOUNT_THRESH_WAN}万")
-        self.logger.info(f"           已从上轨回落 + 时间{PULLBACK_START[0]}:{PULLBACK_START[1]:02d}-{PULLBACK_END[0]}:{PULLBACK_END[1]:02d}")
+        self.logger.info(f"    适用: 低波动日(带宽<{STRATEGY_CONFIG['PULLBACK_BANDWIDTH_THRESH']}元)")
+        self.logger.info(f"    条件: 盘中最高偏离均价>{STRATEGY_CONFIG['PULLBACK_DAY_HIGH_DEVIATION']} + 从高点回落>{STRATEGY_CONFIG['PULLBACK_PULLBACK_FROM_HIGH']} + 收盘偏离均价>{STRATEGY_CONFIG['PULLBACK_CLOSE_ABOVE_AVG']} + 额≥{STRATEGY_CONFIG['PULLBACK_AMOUNT_THRESH_WAN']}万")
+        self.logger.info(f"           已从上轨回落 + 时间{STRATEGY_CONFIG['PULLBACK_START'][0]}:{STRATEGY_CONFIG['PULLBACK_START'][1]:02d}-{STRATEGY_CONFIG['PULLBACK_END'][0]}:{STRATEGY_CONFIG['PULLBACK_END'][1]:02d}")
         self.logger.info("  【正T买入策略】v16.1 极低位高胜率组合 + BOLL带宽约束（90min窗口回测83%胜率@0.20目标）")
-        self.logger.info(f"    条件: 偏离均价>{ZHENGT_MA_BELOW}元 + 风险<{ZHENGT_RISK_THRESH} + 额≥{ZHENGT_AMOUNT_THRESH_WAN}万")
-        self.logger.info(f"           涨跌≤{ZHENGT_ZD_THRESH} + 日振幅≥{ZHENGT_MIN_AMPLITUDE}元 + BOLL带宽>{ZHENGT_MIN_BOLL_WIDTH}%")
-        self.logger.info(f"    硬约束: {ZHENGT_LATEST_HOUR}:00后不做 + 连跌>{ZHENGT_MAX_CONSEC_DOWN}天不做")
-        self.logger.info(f"    目标差价: {ZHENGT_TARGET_DIFF}元 | 止损: {ZHENGT_STOP_LOSS_DIFF}元")
-        self.logger.info(f"  时间窗口: {TRADE_START[0]}:{TRADE_START[1]:02d} ~ {TRADE_END[0]}:{TRADE_END[1]:02d}")
+        self.logger.info(f"    条件: 偏离均价>{STRATEGY_CONFIG['ZHENGT_MA_BELOW']}元 + 风险<{STRATEGY_CONFIG['ZHENGT_RISK_THRESH']} + 额≥{STRATEGY_CONFIG['ZHENGT_AMOUNT_THRESH_WAN']}万")
+        self.logger.info(f"           涨跌≤{STRATEGY_CONFIG['ZHENGT_ZD_THRESH']} + 日振幅≥{STRATEGY_CONFIG['ZHENGT_MIN_AMPLITUDE']}元 + BOLL带宽>{STRATEGY_CONFIG['ZHENGT_MIN_BOLL_WIDTH']}%")
+        self.logger.info(f"    硬约束: {STRATEGY_CONFIG['ZHENGT_LATEST_HOUR']}:00后不做 + 连跌>{STRATEGY_CONFIG['ZHENGT_MAX_CONSEC_DOWN']}天不做")
+        self.logger.info(f"    目标差价: {STRATEGY_CONFIG['ZHENGT_TARGET_DIFF']}元 | 止损: {STRATEGY_CONFIG['ZHENGT_STOP_LOSS_DIFF']}元")
+        self.logger.info(f"  时间窗口: {STRATEGY_CONFIG['TRADE_START'][0]}:{STRATEGY_CONFIG['TRADE_START'][1]:02d} ~ {STRATEGY_CONFIG['TRADE_END'][0]}:{STRATEGY_CONFIG['TRADE_END'][1]:02d}")
         self.logger.info("  【动态目标差价 & 止损差价】")
-        self.logger.info(f"    缩量日(<72亿): 目标{TARGET_DIFF_LOW_VOLUME}元 | 止损{STOP_LOSS_DIFF_LOW_VOLUME}元")
-        self.logger.info(f"    正常日(≥72亿): 目标{TARGET_DIFF_NORMAL}元 | 止损{STOP_LOSS_DIFF_NORMAL}元")
-        self.logger.info(f"    极端缩量(<30亿): 目标{EXTREME_LOW_TARGET}元 | 止损0.10元")
+        self.logger.info(f"    缩量日(<72亿): 目标{STRATEGY_CONFIG['TARGET_DIFF_LOW_VOLUME']}元 | 止损{STRATEGY_CONFIG['STOP_LOSS_DIFF_LOW_VOLUME']}元")
+        self.logger.info(f"    正常日(≥72亿): 目标{STRATEGY_CONFIG['TARGET_DIFF_NORMAL']}元 | 止损{STRATEGY_CONFIG['STOP_LOSS_DIFF_NORMAL']}元")
+        self.logger.info(f"    极端缩量(<30亿): 目标{STRATEGY_CONFIG['EXTREME_LOW_TARGET']}元 | 止损0.10元")
         self.logger.info("=" * 60)
 
         # v15.2: 如果启动时已收盘（>=15:07），直接退出，不推送任何消息
@@ -2172,7 +2062,7 @@ class PAMonitor:
         self.signal_count_today = 0
         self.sell_active = False
         self.buyback_notified = False
-        self.last_signal_bar = -COOLDOWN_BARS - 1  # v15.2: 新交易日重置倒T冷却期
+        self.last_signal_bar = -STRATEGY_CONFIG['COOLDOWN_BARS'] - 1  # v15.2: 新交易日重置倒T冷却期
         self.sell_stop_loss_triggered = False  # v15.3: 重置倒T止损触发标志
         self.sell_signal_bar = 0               # v15.3: 重置倒T信号bar编号
         self.sell_eval_notified = False         # v15.3: 重置倒T评估推送标志
@@ -2390,13 +2280,13 @@ class PAMonitor:
                             current_total_bars = len(df) if df is not None else 0
                             if current_total_bars > 0 and self.sell_signal_bar > 0:
                                 elapsed = current_total_bars - self.sell_signal_bar
-                                remaining = max(0, EVAL_WINDOW_BARS - elapsed)
+                                remaining = max(0, STRATEGY_CONFIG['EVAL_WINDOW_BARS'] - elapsed)
                                 eval_info = f"\n⏱️ 倒T评估倒计时：{remaining}分钟"
                         if self.zhengt_buy_active and self.zhengt_stop_loss_triggered and not self.zhengt_eval_notified:
                             current_total_bars = len(df) if df is not None else 0
                             if current_total_bars > 0 and self.zhengt_signal_bar > 0:
                                 elapsed = current_total_bars - self.zhengt_signal_bar
-                                remaining = max(0, EVAL_WINDOW_BARS - elapsed)
+                                remaining = max(0, STRATEGY_CONFIG['EVAL_WINDOW_BARS'] - elapsed)
                                 eval_info += f"\n⏱️ 正T评估倒计时：{remaining}分钟"
 
                         notify("💓 中国平安 心跳",
@@ -2489,7 +2379,7 @@ class PAMonitor:
                             direction = "跳高" if gap > 0 else "跳低"
                             est_bark += f"\n（含{direction}{abs(gap):.2f}元跳空修正）"
                         if est['is_extreme_low']:
-                            est_bark += f"\n\n⚠️ 极端缩量！建议目标差价降至{EXTREME_LOW_TARGET}元"
+                            est_bark += f"\n\n⚠️ 极端缩量！建议目标差价降至{STRATEGY_CONFIG['EXTREME_LOW_TARGET']}元"
                         elif est['is_volume_low']:
                             est_bark += f"\n\n🟡 缩量交易日，审慎交易"
                 self.hb_cache['est_bark'] = est_bark
@@ -2597,17 +2487,17 @@ class PAMonitor:
                 # 根据量能环境确定目标差价和止损差价（供倒T和正T共用）
                 if est:
                     if est['is_extreme_low']:
-                        current_target = EXTREME_LOW_TARGET
+                        current_target = STRATEGY_CONFIG['EXTREME_LOW_TARGET']
                         current_stop_loss = 0.10
                     elif est['is_volume_low']:
-                        current_target = TARGET_DIFF_LOW_VOLUME
-                        current_stop_loss = STOP_LOSS_DIFF_LOW_VOLUME
+                        current_target = STRATEGY_CONFIG['TARGET_DIFF_LOW_VOLUME']
+                        current_stop_loss = STRATEGY_CONFIG['STOP_LOSS_DIFF_LOW_VOLUME']
                     else:
-                        current_target = TARGET_DIFF_NORMAL
-                        current_stop_loss = STOP_LOSS_DIFF_NORMAL
+                        current_target = STRATEGY_CONFIG['TARGET_DIFF_NORMAL']
+                        current_stop_loss = STRATEGY_CONFIG['STOP_LOSS_DIFF_NORMAL']
                 else:
-                    current_target = TARGET_DIFF_LOW_VOLUME
-                    current_stop_loss = STOP_LOSS_DIFF_LOW_VOLUME
+                    current_target = STRATEGY_CONFIG['TARGET_DIFF_LOW_VOLUME']
+                    current_stop_loss = STRATEGY_CONFIG['STOP_LOSS_DIFF_LOW_VOLUME']
 
                 if triggered:
                     self.signal_count_today += 1
@@ -2654,11 +2544,11 @@ class PAMonitor:
                         price_diff = details.get('股价差', 0)
                         macd_abs = details.get('MACD柱绝对', 0)
                         cond_labels = [
-                            f"涨跌 {zhangdie:.1f} > {ZHANGDIE_THRESH}",
-                            f"风险 {fengxian:.1f} > {FENGXIAN_THRESH}",
-                            f"成交额 {amount_wan:.0f}万 ≥ {AMOUNT_THRESH_WAN}万",
-                            f"股价差 {price_diff:+.3f} > {MA_ABOVE}",
-                            f"|MACD柱| {macd_abs:.4f} > {MACD_BAR_THRESH}",
+                            f"涨跌 {zhangdie:.1f} > {STRATEGY_CONFIG['ZHANGDIE_THRESH']}",
+                            f"风险 {fengxian:.1f} > {STRATEGY_CONFIG['FENGXIAN_THRESH']}",
+                            f"成交额 {amount_wan:.0f}万 ≥ {STRATEGY_CONFIG['AMOUNT_THRESH_WAN']}万",
+                            f"股价差 {price_diff:+.3f} > {STRATEGY_CONFIG['MA_ABOVE']}",
+                            f"|MACD柱| {macd_abs:.4f} > {STRATEGY_CONFIG['MACD_BAR_THRESH']}",
                         ]
                         cond_marks = ["✅" if c else "❌" for c in details.get('满足条件', {}).values()]
                         strategy_badge = "🔥 动量策略（主力）"
@@ -2669,11 +2559,11 @@ class PAMonitor:
                         price_diff = details.get('股价差', 0)
                         macd_bar = details.get('MACD柱', 0)
                         cond_labels = [
-                            f"触碰上轨 {high_price:.2f} ≥ {boll_upper*BOLL_TOUCH_RATIO:.3f}",
-                            f"成交额 {amount_wan:.0f}万 ≥ {BOLL_AMOUNT_THRESH_WAN}万",
-                            f"股价差 {price_diff:+.3f} > {BOLL_MA_ABOVE}",
-                            f"偏离均价 {price_diff:+.3f} > {BOLL_DEVIATION_THRESH}",
-                            f"MACD柱 {macd_bar:.4f} > {BOLL_MACD_THRESH}",
+                            f"触碰上轨 {high_price:.2f} ≥ {boll_upper*STRATEGY_CONFIG['BOLL_TOUCH_RATIO']:.3f}",
+                            f"成交额 {amount_wan:.0f}万 ≥ {STRATEGY_CONFIG['BOLL_AMOUNT_THRESH_WAN']}万",
+                            f"股价差 {price_diff:+.3f} > {STRATEGY_CONFIG['BOLL_MA_ABOVE']}",
+                            f"偏离均价 {price_diff:+.3f} > {STRATEGY_CONFIG['BOLL_DEVIATION_THRESH']}",
+                            f"MACD柱 {macd_bar:.4f} > {STRATEGY_CONFIG['BOLL_MACD_THRESH']}",
                         ]
                         cond_marks = ["✅" if c else "❌" for c in details.get('满足条件', {}).values()]
                         strategy_badge = "📊 BOLL补充策略"
@@ -2687,12 +2577,12 @@ class PAMonitor:
                         current_price = details.get('价格', 0)
                         boll_upper = details.get('BOLL上轨', 0)
                         cond_labels = [
-                            f"盘中最高偏离均价>{PULLBACK_DAY_HIGH_DEVIATION} {high_diff_from_avg:+.3f}",
-                            f"从高点回落>{PULLBACK_PULLBACK_FROM_HIGH} {pullback_from_high:+.3f}",
-                            f"收盘偏离均价>{PULLBACK_CLOSE_ABOVE_AVG} {close_diff:+.3f}",
-                            f"成交额≥{PULLBACK_AMOUNT_THRESH_WAN}万 {amount_wan:.0f}万",
+                            f"盘中最高偏离均价>{STRATEGY_CONFIG['PULLBACK_DAY_HIGH_DEVIATION']} {high_diff_from_avg:+.3f}",
+                            f"从高点回落>{STRATEGY_CONFIG['PULLBACK_PULLBACK_FROM_HIGH']} {pullback_from_high:+.3f}",
+                            f"收盘偏离均价>{STRATEGY_CONFIG['PULLBACK_CLOSE_ABOVE_AVG']} {close_diff:+.3f}",
+                            f"成交额≥{STRATEGY_CONFIG['PULLBACK_AMOUNT_THRESH_WAN']}万 {amount_wan:.0f}万",
                             f"已从上轨回落 {current_price:.2f}<{boll_upper:.3f}",
-                            f"时间窗口 {PULLBACK_START[0]}:{PULLBACK_START[1]:02d}-{PULLBACK_END[0]}:{PULLBACK_END[1]:02d}",
+                            f"时间窗口 {STRATEGY_CONFIG['PULLBACK_START'][0]}:{STRATEGY_CONFIG['PULLBACK_START'][1]:02d}-{STRATEGY_CONFIG['PULLBACK_END'][0]}:{STRATEGY_CONFIG['PULLBACK_END'][1]:02d}",
                         ]
                         cond_marks = ["✅" if c else "❌" for c in details.get('满足条件', {}).values()]
                         strategy_badge = "📉 冲高回落v16.0（低波动日）"
@@ -2763,20 +2653,20 @@ class PAMonitor:
                     self.zhengt_window_max_price = zhengt_price  # v16.1.2 FIX: 初始化窗口最高价追踪
                     self.zhengt_buy_time = zhengt_details.get('时间', '')
                     # v15.1: 正T使用专用目标差价（0.20元），不再与倒T共用
-                    self.zhengt_target_sell_price = round(zhengt_price + ZHENGT_TARGET_DIFF, 2)
-                    self.zhengt_stop_loss_price = round(zhengt_price - ZHENGT_STOP_LOSS_DIFF, 2)
+                    self.zhengt_target_sell_price = round(zhengt_price + STRATEGY_CONFIG['ZHENGT_TARGET_DIFF'], 2)
+                    self.zhengt_stop_loss_price = round(zhengt_price - STRATEGY_CONFIG['ZHENGT_STOP_LOSS_DIFF'], 2)
                     self.zhengt_sell_notified = False
                     self.zhengt_stop_loss_triggered = False  # v15.3: 重置正T止损触发标志
                     self.zhengt_signal_bar = total_bars - 1  # v15.3: 记录正T信号触发bar编号
                     self.zhengt_eval_notified = False         # v15.3: 重置正T评估推送标志
 
                     zhengt_cond_labels = [
-                        f"偏离均价 {zhengt_details.get('偏离均价', 0):+.3f} > {ZHENGT_MA_BELOW}元",
-                        f"风险 {zhengt_details.get('风险', 0):.1f} < {ZHENGT_RISK_THRESH}",
-                        f"成交额 {zhengt_details.get('成交额万', 0):.0f}万 ≥ {ZHENGT_AMOUNT_THRESH_WAN}万",
-                        f"涨跌 {zhengt_details.get('涨跌', 0):.1f} ≤ {ZHENGT_ZD_THRESH}",
-                        f"日振幅 {zhengt_details.get('日振幅', 0):.2f} ≥ {ZHENGT_MIN_AMPLITUDE}元",
-                        f"BOLL带宽 {zhengt_details.get('BOLL带宽', 0):.2f}元 > {ZHENGT_MIN_BOLL_WIDTH}元",
+                        f"偏离均价 {zhengt_details.get('偏离均价', 0):+.3f} > {STRATEGY_CONFIG['ZHENGT_MA_BELOW']}元",
+                        f"风险 {zhengt_details.get('风险', 0):.1f} < {STRATEGY_CONFIG['ZHENGT_RISK_THRESH']}",
+                        f"成交额 {zhengt_details.get('成交额万', 0):.0f}万 ≥ {STRATEGY_CONFIG['ZHENGT_AMOUNT_THRESH_WAN']}万",
+                        f"涨跌 {zhengt_details.get('涨跌', 0):.1f} ≤ {STRATEGY_CONFIG['ZHENGT_ZD_THRESH']}",
+                        f"日振幅 {zhengt_details.get('日振幅', 0):.2f} ≥ {STRATEGY_CONFIG['ZHENGT_MIN_AMPLITUDE']}元",
+                        f"BOLL带宽 {zhengt_details.get('BOLL带宽', 0):.2f}元 > {STRATEGY_CONFIG['ZHENGT_MIN_BOLL_WIDTH']}元",
                     ]
                     zhengt_cond_marks = ["✅" if c else "❌" for c in zhengt_details.get('满足条件', [])]
                     
@@ -2784,19 +2674,19 @@ class PAMonitor:
                     zhengt_est_info = ""
                     if est:
                         if est.get('is_extreme_low'):
-                            zhengt_est_info = f"\n⚠️ 极端缩量！目标{ZHENGT_TARGET_DIFF}元，止损{ZHENGT_STOP_LOSS_DIFF}元"
+                            zhengt_est_info = f"\n⚠️ 极端缩量！目标{STRATEGY_CONFIG['ZHENGT_TARGET_DIFF']}元，止损{STRATEGY_CONFIG['ZHENGT_STOP_LOSS_DIFF']}元"
                         elif est.get('is_volume_low'):
-                            zhengt_est_info = f"\n🟡 缩量日！目标{ZHENGT_TARGET_DIFF}元，止损{ZHENGT_STOP_LOSS_DIFF}元"
+                            zhengt_est_info = f"\n🟡 缩量日！目标{STRATEGY_CONFIG['ZHENGT_TARGET_DIFF']}元，止损{STRATEGY_CONFIG['ZHENGT_STOP_LOSS_DIFF']}元"
                         else:
-                            zhengt_est_info = f"\n✅ 正常量能！目标{ZHENGT_TARGET_DIFF}元，止损{ZHENGT_STOP_LOSS_DIFF}元"
+                            zhengt_est_info = f"\n✅ 正常量能！目标{STRATEGY_CONFIG['ZHENGT_TARGET_DIFF']}元，止损{STRATEGY_CONFIG['ZHENGT_STOP_LOSS_DIFF']}元"
 
                     zhengt_msg = (
                         f"{zhengt_details.get('时间', '')}  触发正T买入信号！\n\n"
                         f"当前指标：\n"
                         f"{'  '.join([f'{m} {l}' for m, l in zip(zhengt_cond_marks, zhengt_cond_labels)])}\n\n"
                         f"买入参考价: {zhengt_price}元\n"
-                        f"建议挂卖单: {self.zhengt_target_sell_price}元（目标差价{ZHENGT_TARGET_DIFF}元）\n"
-                        f"止损卖出价: {self.zhengt_stop_loss_price}元（止损差价{ZHENGT_STOP_LOSS_DIFF}元）"
+                        f"建议挂卖单: {self.zhengt_target_sell_price}元（目标差价{STRATEGY_CONFIG['ZHENGT_TARGET_DIFF']}元）\n"
+                        f"止损卖出价: {self.zhengt_stop_loss_price}元（止损差价{STRATEGY_CONFIG['ZHENGT_STOP_LOSS_DIFF']}元）"
                         f"{zhengt_est_info}\n\n"
                         f"请打开同花顺 App 操作！\n"
                         f"买入后会持续监控，到价自动提醒卖出！"
@@ -2814,7 +2704,7 @@ class PAMonitor:
                         "type": "正T策略",
                         "price": zhengt_price,
                         "time": zhengt_details.get("时间", ""),
-                        "target": ZHENGT_TARGET_DIFF,
+                        "target": STRATEGY_CONFIG['ZHENGT_TARGET_DIFF'],
                         "status": "active"
                     })
 
