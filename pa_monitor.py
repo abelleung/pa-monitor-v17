@@ -1362,6 +1362,7 @@ class PAMonitor:
 
         # === 日内数据记录（用于CSV导出） ===
         self.daily_bars = []  # 存储今天所有已处理K线的指标数据
+        self.hb_cache = {}  # v16.1.2: 心跳缓存（改为实例变量，便于提取心跳方法）
 
         # === 日报统计 ===
         self.daily_stats = {
@@ -2108,6 +2109,17 @@ class PAMonitor:
 
         return zhengt_triggered, zhengt_details
 
+    def _send_heartbeat(self, now, df):
+        """
+        构建并发送心跳（从 run() 提取，便于独立维护）
+        包含：时机判断、缓存指标展示、实时预估计算、90分钟窗口倒计时、通知发送
+        """
+        # v11.6: 心跳判断提到数据拉取之前，用缓存指标发完整心跳
+        heartbeat_key = f"{h}:{m // 10 * 10:02d}"
+        if m % 10 == 0 and heartbeat_key != last_heartbeat and (h, m) <= (15, 0):
+            last_heartbeat = heartbeat_key
+            self._send_heartbeat(now, df)
+
     def run(self):
         """主运行循环"""
         self.logger.info("=" * 60)
@@ -2224,12 +2236,7 @@ class PAMonitor:
         check_interval = 3  # 每3秒检查一次
         last_heartbeat = ""  # v11.0: 记录最后心跳时间，防止重复
         # v11.6: 缓存完整心跳指标，确保心跳内容始终完整
-        hb_cache = {
-            'price': self.daily_stats.get('prev_close') or 0,
-            'zd': 0, 'fx': 0, 'amt': 0, 'macd': 0, 'maimai': 0,
-            'boll_up': 0, 'boll_width': 0,  # BOLL指标（动量+BOLL策略共用）
-            'est_bark': '',  # 量能预估文本
-        }
+        # hb_cache 改为实例变量，已在__init__()中初始化
 
         self.logger.info("进入盘中监控循环...")
         loop_count = 0
@@ -2317,11 +2324,11 @@ class PAMonitor:
                 heartbeat_key = f"{h}:{m // 10 * 10:02d}"
                 if m % 10 == 0 and heartbeat_key != last_heartbeat and (h, m) <= (15, 0):
                     last_heartbeat = heartbeat_key
-                    cp = hb_cache['price']
+                    cp = self.hb_cache['price']
                     if cp and cp > 0:
-                        czd = hb_cache['zd']
-                        cfx = hb_cache['fx']
-                        cmm = hb_cache['maimai']
+                        czd = self.hb_cache['zd']
+                        cfx = self.hb_cache['fx']
+                        cmm = self.hb_cache['maimai']
                         mm_tag = f"🔴{cmm:+.0f}" if cmm > 1100 else (f"🟢{cmm:+.0f}" if cmm < 900 else f"⚪{cmm:+.0f}")
                         
                         # v13.5 FIX: 心跳时强制实时拉取最新数据计算预估，不使用缓存df
@@ -2369,7 +2376,7 @@ class PAMonitor:
                                         )
                         except Exception as e:
                             self.logger.warning(f"心跳预估计算失败: {e}")
-                            est_bark_for_heartbeat = hb_cache.get('est_bark', '')
+                            est_bark_for_heartbeat = self.hb_cache.get('est_bark', '')
                         
                         self.logger.info(
                             f"💓 {now.strftime('%H:%M')} 价格={cp:.2f} 涨跌={czd:.0f} "
@@ -2395,10 +2402,10 @@ class PAMonitor:
                         notify("💓 中国平安 心跳",
                             f"💓 {now.strftime('%H:%M')} 心跳\n\n"
                             f"价格：{cp:.2f}\n"
-                            f"BOLL上轨：{hb_cache.get('boll_up', 0):.3f}\n"
-                            f"BOLL带宽：{hb_cache.get('boll_width', 0):.2f}元\n"
-                            f"MACD柱：{hb_cache.get('macd', 0):.4f}\n"
-                            f"成交额：{hb_cache['amt']:.0f}万\n"
+                            f"BOLL上轨：{self.hb_cache.get('boll_up', 0):.3f}\n"
+                            f"BOLL带宽：{self.hb_cache.get('boll_width', 0):.2f}元\n"
+                            f"MACD柱：{self.hb_cache.get('macd', 0):.4f}\n"
+                            f"成交额：{self.hb_cache['amt']:.0f}万\n"
                             f"倒T信号：{self.signal_count_today}{' ⏳追踪中' if self.sell_active else ''}{' ⚠️止损' if self.sell_stop_loss_triggered else ''}\n"
                             f"正T信号：{self.zhengt_signal_count_today}{' ⏳追踪中' if self.zhengt_buy_active else ''}{' ⚠️止损' if self.zhengt_stop_loss_triggered else ''}"
                             f"{eval_info}"
@@ -2442,15 +2449,15 @@ class PAMonitor:
                 # v11.6: 数据拉取成功后，更新缓存指标供下次心跳使用
                 if loop_count <= 5:
                     self.logger.info(f"[#{loop_count}] 开始更新缓存...")
-                hb_cache['price'] = safe_float(completed['收盘'])
-                hb_cache['zd'] = safe_float(completed['涨跌'], hb_cache.get('zd', 0))
-                hb_cache['fx'] = safe_float(completed['风险'], hb_cache.get('fx', 0))
-                hb_cache['amt'] = safe_float(completed.get('成交额_万'), hb_cache.get('amt', 0))
-                hb_cache['macd'] = safe_float(completed.get('MACD柱'), hb_cache.get('macd', 0))
-                hb_cache['maimai'] = safe_float(completed.get('买卖力道'), hb_cache.get('maimai', 0))
+                self.hb_cache['price'] = safe_float(completed['收盘'])
+                self.hb_cache['zd'] = safe_float(completed['涨跌'], self.hb_cache.get('zd', 0))
+                self.hb_cache['fx'] = safe_float(completed['风险'], self.hb_cache.get('fx', 0))
+                self.hb_cache['amt'] = safe_float(completed.get('成交额_万'), self.hb_cache.get('amt', 0))
+                self.hb_cache['macd'] = safe_float(completed.get('MACD柱'), self.hb_cache.get('macd', 0))
+                self.hb_cache['maimai'] = safe_float(completed.get('买卖力道'), self.hb_cache.get('maimai', 0))
                 # v13.0: 增加BOLL指标缓存
-                hb_cache['boll_up'] = safe_float(completed.get('BOLL上轨'), hb_cache.get('boll_up', 0))
-                hb_cache['boll_width'] = safe_float(completed.get('BOLL带宽'), hb_cache.get('boll_width', 0))
+                self.hb_cache['boll_up'] = safe_float(completed.get('BOLL上轨'), self.hb_cache.get('boll_up', 0))
+                self.hb_cache['boll_width'] = safe_float(completed.get('BOLL带宽'), self.hb_cache.get('boll_width', 0))
 
                 # v11.6: 每次数据拉取成功后计算量能预估并缓存
                 est = estimate_daily_amount_and_amplitude(
@@ -2485,7 +2492,7 @@ class PAMonitor:
                             est_bark += f"\n\n⚠️ 极端缩量！建议目标差价降至{EXTREME_LOW_TARGET}元"
                         elif est['is_volume_low']:
                             est_bark += f"\n\n🟡 缩量交易日，审慎交易"
-                hb_cache['est_bark'] = est_bark
+                self.hb_cache['est_bark'] = est_bark
                 if loop_count <= 5:
                     self.logger.info(f"[#{loop_count}] 缓存更新完成")
 
