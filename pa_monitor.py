@@ -351,9 +351,7 @@ def release_pid():
 
 def setup_logging():
     """配置日志系统（仅文件，不输出到stdout避免nohup双行）"""
-    print("DEBUG: setup_logging() started", flush=True)
     config = load_config()
-    print(f"DEBUG: setup_logging() config loaded: {list(config.keys()) if config else 'empty'}", flush=True)
     log_dir = Path(config.get("log_dir", str(PROJECT_DIR / "monitor_logs")))
     log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1445,6 +1443,17 @@ class PAMonitor:
         if in_daot_cooldown:
             return False, None, None, False, None, None, None
 
+        # v16.5: 暴跌/暴涨保护
+        # 暴跌保护：日内跌幅>2.0%跳过所有倒T信号
+        day_drop_pct = 0
+        if self.daily_stats.get('prev_close', 0) > 0 and completed['收盘'] < self.daily_stats['prev_close']:
+            day_drop_pct = (self.daily_stats['prev_close'] - completed['收盘']) / self.daily_stats['prev_close'] * 100
+            if day_drop_pct > STRATEGY_CONFIG['CRASH_DAY_DROP_MAX']:
+                self.logger.info(f"⚠️ 暴跌保护：日内跌幅{day_drop_pct:.2f}% > {STRATEGY_CONFIG['CRASH_DAY_DROP_MAX']}%，跳过倒T信号")
+                return False, None, None, False, None, None, None
+
+        # 暴涨保护：日内涨幅>3.0%跳过正T买入（在check_zhengT中检查）
+
         # 策略1: 动量策略（主力，v10.2涨跌+风险）
         momentum_triggered, momentum_details = check_momentum_sell_signal(completed, self.logger)
 
@@ -1452,7 +1461,8 @@ class PAMonitor:
         boll_triggered = False
         boll_details = None
         if not momentum_triggered and not self.sell_active:
-            boll_triggered, boll_details = check_boll_sell_signal(completed, self.logger)
+            boll_triggered, boll_details = check_boll_sell_signal(
+                completed, self.logger, day_high=self.daily_stats.get('high_price', 0))
 
         # 策略3: 冲高回落策略（低波动日备用，仅前两个策略都未触发时检查）
         current_bandwidth = safe_float(completed['BOLL带宽'])
@@ -1506,6 +1516,14 @@ class PAMonitor:
         if (total_bars - 1 - self.last_zhengt_signal_bar) < STRATEGY_CONFIG['COOLDOWN_BARS']:
             return False, None
 
+        # v16.5: 暴涨保护：日内涨幅>3.0%跳过正T买入
+        prev_close = self.daily_stats.get('prev_close', 0)
+        if prev_close > 0:
+            day_gain_pct = (completed['收盘'] - prev_close) / prev_close * 100
+            if day_gain_pct > STRATEGY_CONFIG['BOOM_DAY_GAIN_MAX']:
+                self.logger.info(f"🚫 暴涨保护：日内涨幅{day_gain_pct:.2f}% > {STRATEGY_CONFIG['BOOM_DAY_GAIN_MAX']}%，跳过正T买入")
+                return False, None
+
         # v15.1硬约束1: 14:00后不做正T（回测胜率仅36%）
         latest_time = str(completed['时间'])
         current_hour = int(latest_time[11:13]) if len(latest_time) >= 13 else 0
@@ -1526,9 +1544,12 @@ class PAMonitor:
         if current_amplitude > 100 or current_amplitude < 0:  # 异常值保护（过大或负数）
             current_amplitude = 0
         current_boll_width = safe_float(completed.get('BOLL带宽'), 0)
+        # 转换为百分比（BOLL带宽/收盘价 × 100%）
+        current_price = safe_float(completed['收盘'])
+        boll_width_pct = (current_boll_width / current_price * 100) if current_price > 0 else 0
 
         zhengt_triggered, zhengt_details = check_zhengT_buy_signal(
-            completed, self.logger, amplitude=current_amplitude, boll_width=current_boll_width)
+            completed, self.logger, amplitude=current_amplitude, boll_width_pct=boll_width_pct)
 
         return zhengt_triggered, zhengt_details
 
@@ -1545,7 +1566,6 @@ class PAMonitor:
 
     def run(self):
         """主运行循环"""
-        print("DEBUG: run() started", flush=True)
         self.logger.info("=" * 60)
         self.logger.info("  中国平安 v16.1.2 三策略倒T+正T策略监控系统 启动")
         self.logger.info(f"  股票: {self.config.get('stock_code', '601318')} {self.config.get('stock_name', '中国平安')}")
@@ -1573,7 +1593,6 @@ class PAMonitor:
 
         # 模拟测试模式
         if self.simulate:
-            print("DEBUG: Entering simulation mode", flush=True)
             self.logger.info("⚠️  模拟测试模式已启用")
             self.logger.info(f"   数据文件: {self.simulate_csv}")
             self.logger.info(f"   播放速度: {self.simulate_speed}x")
