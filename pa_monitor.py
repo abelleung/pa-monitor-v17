@@ -1947,6 +1947,104 @@ class PAMonitor:
                 self.logger.info(f"🔓 90分钟窗口评估结束，冷却期解锁")
                 return
 
+    def _check_daot_signals(self, df, completed, total_bars):
+        """
+        检查倒T三策略信号（动量/BOLL/冲高回落）
+        返回: (triggered, details, strategy_type, is_low_volatility, momentum_details, boll_details, pullback_details)
+        """
+        # v16.1.2: 倒T冷却期检查
+        in_daot_cooldown = (total_bars - 1 - self.last_signal_bar) < COOLDOWN_BARS
+
+        if in_daot_cooldown:
+            return False, None, None, False, None, None, None
+
+        # 策略1: 动量策略（主力，v10.2涨跌+风险）
+        momentum_triggered, momentum_details = check_momentum_sell_signal(completed, self.logger)
+
+        # 策略2: BOLL上轨策略（补充，仅动量未触发时检查）
+        boll_triggered = False
+        boll_details = None
+        if not momentum_triggered and not self.sell_active:
+            boll_triggered, boll_details = check_boll_sell_signal(completed, self.logger)
+
+        # 策略3: 冲高回落策略（低波动日备用，仅前两个策略都未触发时检查）
+        current_bandwidth = safe_float(completed['BOLL带宽'])
+        is_low_volatility = current_bandwidth < PULLBACK_BANDWIDTH_THRESH
+
+        pullback_triggered = False
+        pullback_details = None
+        if not momentum_triggered and not boll_triggered and is_low_volatility and not self.sell_active:
+            pullback_triggered, pullback_details = check_pullback_sell_signal(
+                df, total_bars - 2, self.logger, day_high=self.daily_stats['high_price'])
+            if pullback_triggered:
+                self.logger.info(f"📉 低波动日启用冲高回落策略 (带宽={current_bandwidth:.2f}元 < {PULLBACK_BANDWIDTH_THRESH}元)")
+
+        # 确定最终触发策略
+        triggered = momentum_triggered or boll_triggered or pullback_triggered
+        if momentum_triggered:
+            details = momentum_details
+            strategy_type = '动量策略'
+        elif boll_triggered:
+            details = boll_details
+            strategy_type = 'BOLL补充'
+        else:
+            details = pullback_details
+            strategy_type = '冲高回落'
+
+        # 低波动日接近触发日志
+        if is_low_volatility and not self.sell_active and total_bars >= 5 and pullback_details is not None:
+            if '满足数量' in pullback_details:
+                pb_met = pullback_details.get('满足数量', 0)
+                if pb_met >= 4:
+                    self.daily_stats['near_trigger_count'] += 1
+                    self.logger.info(
+                        f"📉 冲高回落接近触发 ({pb_met}/6): {str(completed['时间'])} "
+                        f"盘中最高={pullback_details.get('盘中最高', 0):.2f} "
+                        f"回落={pullback_details.get('从高点回落', 0):+.3f} "
+                        f"收盘偏离={pullback_details.get('收盘偏离均价', 0):+.3f} "
+                        f"额={pullback_details.get('成交额万', 0):.0f}万"
+                    )
+
+        return triggered, details, strategy_type, is_low_volatility, momentum_details, boll_details, pullback_details
+
+    def _check_zhengt_signals(self, df, completed, total_bars):
+        """
+        检查正T买入信号
+        返回: (triggered, details)
+        """
+        if self.zhengt_buy_active:
+            return False, None
+
+        # 正T独立冷却期
+        if (total_bars - 1 - self.last_zhengt_signal_bar) < COOLDOWN_BARS:
+            return False, None
+
+        # v15.1硬约束1: 14:00后不做正T（回测胜率仅36%）
+        latest_time = str(completed['时间'])
+        current_hour = int(latest_time[11:13]) if len(latest_time) >= 13 else 0
+        if current_hour >= ZHENGT_LATEST_HOUR:
+            return False, None
+
+        # v15.1硬约束2: 连跌>2天不做正T（回测连跌≥3天胜率骤降）
+        if self.daily_stats.get('consecutive_down_days', 0) > ZHENGT_MAX_CONSEC_DOWN:
+            return False, None
+
+        # v16.1: 传入当日振幅 + BOLL带宽用于硬约束判断
+        hp = self.daily_stats.get('high_price')
+        lp = self.daily_stats.get('low_price')
+        if hp is None or lp is None:
+            current_amplitude = 0
+        else:
+            current_amplitude = hp - lp
+        if current_amplitude > 100 or current_amplitude < 0:  # 异常值保护（过大或负数）
+            current_amplitude = 0
+        current_boll_width = safe_float(completed.get('BOLL带宽'), 0)
+
+        zhengt_triggered, zhengt_details = check_zhengT_buy_signal(
+            completed, self.logger, amplitude=current_amplitude, boll_width=current_boll_width)
+
+        return zhengt_triggered, zhengt_details
+
     def run(self):
         """主运行循环"""
         self.logger.info("=" * 60)
@@ -2416,96 +2514,12 @@ class PAMonitor:
                     time.sleep(check_interval)
                     continue
 
-                # v16.1.2: 倒T冷却期检查（正T有独立冷却期，不再被倒T冷却阻塞）
+                # v16.1.2: 倒T信号检查（三策略：动量/BOLL/冲高回落）
                 total_bars = len(df)
-                in_daot_cooldown = (total_bars - 1 - self.last_signal_bar) < COOLDOWN_BARS
+                triggered, details, strategy_type, is_low_volatility, momentum_details, boll_details, pullback_details = self._check_daot_signals(df, completed, total_bars)
 
-                # ==================== 三策略卖出判断 ====================
-                # v14.0 优先级：动量策略(主) → BOLL补充 → 冲高回落(低波动日备用)
-                # v16.1.2: 倒T冷却期间跳过倒T策略（正T不受影响）
-                if in_daot_cooldown:
-                    momentum_triggered = False
-                    momentum_details = None
-                    boll_triggered = False
-                    boll_details = None
-                    pullback_triggered = False
-                    pullback_details = None
-                    triggered = False
-                    details = None
-                    strategy_type = None
-                else:
-                    # 策略1: 动量策略（主力，v10.2涨跌+风险）
-                    momentum_triggered, momentum_details = check_momentum_sell_signal(completed, self.logger)
-                
-                    # 策略2: BOLL上轨策略（补充，仅动量未触发时检查）
-                    boll_triggered = False
-                    boll_details = None
-                    if not momentum_triggered and not self.sell_active:
-                        boll_triggered, boll_details = check_boll_sell_signal(completed, self.logger)
-                
-                    # 策略3: 冲高回落策略（低波动日备用，仅前两个策略都未触发时检查）
-                    current_bandwidth = safe_float(completed['BOLL带宽'])
-                    is_low_volatility = current_bandwidth < PULLBACK_BANDWIDTH_THRESH
-                
-                    pullback_triggered = False
-                    pullback_details = None
-                    if not momentum_triggered and not boll_triggered and is_low_volatility and not self.sell_active:
-                        # v16.0: 传入盘中最高价（已在daily_stats中跟踪）
-                        pullback_triggered, pullback_details = check_pullback_sell_signal(df, total_bars - 2, self.logger, day_high=self.daily_stats['high_price'])
-                        if pullback_triggered:
-                            self.logger.info(f"📉 低波动日启用冲高回落策略 (带宽={current_bandwidth:.2f}元 < {PULLBACK_BANDWIDTH_THRESH}元)")
-                
-                    # 确定最终触发策略
-                    triggered = momentum_triggered or boll_triggered or pullback_triggered
-                    if momentum_triggered:
-                        details = momentum_details
-                        strategy_type = '动量策略'
-                    elif boll_triggered:
-                        details = boll_details
-                        strategy_type = 'BOLL补充'
-                    else:
-                        details = pullback_details
-                        strategy_type = '冲高回落'
-                
-                    # 低波动日接近触发日志
-                    if is_low_volatility and not self.sell_active and total_bars >= 5 and pullback_details is not None:
-                        if '满足数量' in pullback_details:
-                            pb_met = pullback_details.get('满足数量', 0)
-                            if pb_met >= 4:
-                                self.daily_stats['near_trigger_count'] += 1
-                                self.logger.info(
-                                    f"📉 冲高回落接近触发 ({pb_met}/6): {latest_time} "
-                                    f"盘中最高={pullback_details.get('盘中最高', 0):.2f} "
-                                    f"回落={pullback_details.get('从高点回落', 0):+.3f} "
-                                    f"收盘偏离={pullback_details.get('收盘偏离均价', 0):+.3f} "
-                                    f"额={pullback_details.get('成交额万', 0):.0f}万"
-                                )
-                
-                # v16.1.2: 正T买入条件判断（不再与倒T互斥，独立触发）
-                zhengt_triggered = False
-                zhengt_details = None
-                if not self.zhengt_buy_active:
-                    # 正T独立冷却期
-                    if (total_bars - 1 - self.last_zhengt_signal_bar) >= COOLDOWN_BARS:
-                        # v15.1硬约束1: 14:00后不做正T（回测胜率仅36%）
-                        current_hour = int(str(latest_time)[11:13]) if len(str(latest_time)) >= 13 else 0
-                        if current_hour >= ZHENGT_LATEST_HOUR:
-                            pass  # 14:00后跳过正T
-                        # v15.1硬约束2: 连跌>2天不做正T（回测连跌≥3天胜率骤降）
-                        elif self.daily_stats.get('consecutive_down_days', 0) > ZHENGT_MAX_CONSEC_DOWN:
-                            pass  # 连跌天数超标，跳过正T
-                        else:
-                            # v16.1: 传入当日振幅 + BOLL带宽用于硬约束判断
-                            hp = self.daily_stats.get('high_price')
-                            lp = self.daily_stats.get('low_price')
-                            if hp is None or lp is None:
-                                current_amplitude = 0
-                            else:
-                                current_amplitude = hp - lp
-                            if current_amplitude > 100 or current_amplitude < 0:  # 异常值保护（过大或负数）
-                                current_amplitude = 0
-                            current_boll_width = safe_float(completed.get('BOLL带宽'), 0)
-                            zhengt_triggered, zhengt_details = check_zhengT_buy_signal(completed, self.logger, amplitude=current_amplitude, boll_width=current_boll_width)
+                # v16.1.2: 正T信号检查
+                zhengt_triggered, zhengt_details = self._check_zhengt_signals(df, completed, total_bars)
 
                 # 提前计算量能预估（供倒T和正T信号共用）
                 est = estimate_daily_amount_and_amplitude(df, self.daily_stats['prev_close'], self.daily_stats.get('open_price') or 0)
