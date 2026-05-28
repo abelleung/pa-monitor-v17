@@ -1,0 +1,8 @@
+# 中国平安T+0盯盘系统依赖
+# 安装: pip3 install -r requirements.txt
+
+pandas>=1.3.0
+numpy>=1.21.0
+matplotlib>=3.4.0
+pytdx>=1.70
+requests>=2.25.0

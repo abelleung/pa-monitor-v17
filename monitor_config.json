@@ -1,0 +1,18 @@
+{
+    "bark_urls": [
+        "https://api.day.app/FqxBRHmsYpVVk23h2uVqNe/",
+        "https://api.day.app/UDAaCnTTKQ5puo5f9s43Ze/"
+    ],
+    "wechat_webhook": "",
+    "ntfy_topic": "teresa",
+    "ntfy_server": "https://ntfy.sh",
+    "stock_code": "601318",
+    "stock_name": "中国平安",
+    "market": 1,
+    "log_dir": "/Users/abelleung/WorkBuddy/Claw/monitor_logs",
+    "comment": "推送渠道配置（至少填一个）：Bark(iOS)、ntfy(Android/跨平台)、企业微信。Bark: App Store搜索安装后复制URL。ntfy: 安装应用后创建主题如'teresa'。企业微信: 群机器人Webhook地址。",
+    
+    "candlestick_enabled": true,
+    "candlestick_boll_tolerance": 0.001,
+    "candlestick_comment": "蜡烛图形态识别配置。enabled: 是否启用。boll_tolerance: BOLL轨道触碰容差（默认0.1%）"
+}
