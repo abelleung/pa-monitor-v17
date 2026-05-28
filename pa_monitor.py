@@ -1774,6 +1774,90 @@ class PAMonitor:
         export_df.to_csv(csv_path, index=False, encoding="utf-8-sig")
         self.logger.info(f"已导出 {len(export_df)} 根K线到 {csv_path}")
 
+    def _do_window_evaluation(self, signal_type, window_price, threshold, is_greater_than,
+                            signal_time, direction, signal_price, total_bars,
+                            signal_bar, eval_notified_attr, active_attr, window_price_attr,
+                            success_profit_calc):
+        """
+        90分钟窗口评估公共方法（倒T和正T共用）
+        - signal_type: '倒T' or '正T'
+        - window_price: 窗口内极值（倒T用最低价，正T用最高价）
+        - threshold: 成功阈值
+        - is_greater_than: True表示window_price >= threshold，False表示window_price <= threshold
+        - signal_time: 信号触发时间
+        - direction: 'sell' or 'buy'
+        - signal_price: 信号触发价格
+        - total_bars: 当前总K线条数
+        - signal_bar: 信号触发时的bar编号
+        - eval_notified_attr: 评估通知标志的属性名
+        - active_attr: 活跃状态的属性名
+        - window_price_attr: 窗口价格追踪的属性名
+        - success_profit_calc: 成功时的利润计算（失败固定-0.15*1000）
+        返回: True表示已完成评估，False表示未到评估时间
+        """
+        eval_notified = getattr(self, eval_notified_attr)
+        if eval_notified:
+            return False
+        if total_bars is None:
+            return False
+
+        elapsed_bars = total_bars - signal_bar
+        if elapsed_bars < EVAL_WINDOW_BARS:
+            return False
+
+        # 标记已评估
+        setattr(self, eval_notified_attr, True)
+
+        # 评估成败
+        if is_greater_than:
+            success = window_price >= threshold
+        else:
+            success = window_price <= threshold
+
+        if success:
+            result_msg = f"✅ 信号理论有效（窗口内{'反弹' if direction == 'buy' else '回落'}达标）"
+            signal_result = "成功"
+        else:
+            result_msg = f"❌ 信号理论失败（窗口内{'反弹' if direction == 'buy' else '回落'}未达标）"
+            signal_result = "失败"
+
+        # 生成评估消息
+        price_label = '买入价' if direction == 'buy' else '卖出价'
+        window_label = '最高价' if direction == 'buy' else '最低价'
+        stop_loss_attr = 'zhengt_stop_loss_triggered' if direction == 'buy' else 'sell_stop_loss_triggered'
+        stop_loss_triggered = getattr(self, stop_loss_attr)
+
+        msg = (
+            f"📋 {signal_type} 90分钟窗口评估\n\n"
+            f"{price_label}：{signal_price}元（{signal_time}）\n"
+            f"窗口{window_label}：{window_price}元\n"
+            f"止损触发：{'是' if stop_loss_triggered else '否'}\n\n"
+            f"评估结果：{result_msg}\n"
+            f"（评估标准：90分钟内{window_label} {'>' if is_greater_than else '<'} {threshold:.3f}）"
+        )
+        notify(f"📋 {signal_type}窗口评估 — {signal_result}", msg, level="info")
+        self.logger.info(f"📋 {signal_type}90分钟窗口评估：{result_msg}")
+
+        # 更新信号历史
+        if success:
+            profit = success_profit_calc()
+        else:
+            profit = -0.15 * 1000  # 简化估算
+        update_signal_status(signal_time, direction, signal_result, profit)
+
+        # 重置追踪状态
+        setattr(self, active_attr, False)
+        setattr(self, window_price_attr, None)
+        # 智能冷却解锁
+        if direction == 'sell':
+            self.last_signal_bar = total_bars - 1 - COOLDOWN_BARS
+            self.logger.info(f"🔓 90分钟窗口评估结束，冷却期解锁")
+        else:
+            self.last_zhengt_signal_bar = total_bars - 1 - COOLDOWN_BARS
+            self.logger.info(f"🔓 90分钟窗口评估结束，正T冷却期解锁")
+
+        return True
+
     def check_buyback_and_stoploss(self, current_price, current_time, total_bars=None):
         """卖出后追踪：回买提醒 + 90分钟窗口评估（v15.3：止损不终止追踪，90分钟后评估信号成败）"""
         if not self.sell_active:
@@ -1826,40 +1910,29 @@ class PAMonitor:
             # 90分钟窗口到期后会自动评估并结束追踪
             return
 
-        # v15.3: 90分钟窗口评估——止损触发后，窗口到期时评估信号最终成败
-        if self.sell_stop_loss_triggered and not self.sell_eval_notified and total_bars is not None:
-            elapsed_bars = total_bars - self.sell_signal_bar
-            if elapsed_bars >= EVAL_WINDOW_BARS:
-                # 90分钟窗口到期：检查窗口内最低价是否低于卖出价-0.25元
-                self.sell_eval_notified = True
-                window_min = self.sell_window_min_price if self.sell_window_min_price is not None else current_price
-                self.logger.info(f"🔍 倒T窗口评估：卖出价={self.sell_price}，窗口最低价={window_min}，阈值={self.sell_price - 0.25:.3f}")
-                if window_min <= self.sell_price - 0.25:
-                    result_msg = "✅ 信号理论有效（窗口内曾回落≥0.25元）"
-                    signal_result = "成功"
-                else:
-                    result_msg = "❌ 信号理论失败（90分钟窗口内未回落≥0.25元）"
-                    signal_result = "失败"
-                msg = (
-                    f"📋 倒T 90分钟窗口评估\n\n"
-                    f"卖出价：{self.sell_price}元（{self.sell_time}）\n"
-                    f"窗口最低价：{window_min}元\n"
-                    f"止损触发：{'是' if self.sell_stop_loss_triggered else '否'}\n\n"
-                    f"评估结果：{result_msg}\n"
-                    f"（评估标准：90分钟内最低价 < 卖出价-0.25元）"
-                )
-                notify(f"📋 倒T窗口评估 — {signal_result}", msg, level="info")
-                self.logger.info(f"📋 倒T90分钟窗口评估：{result_msg}")
-                # 更新信号历史状态
-                daot_profit = (self.sell_price - current_price) * 1000 if signal_result == "成功" else -0.15 * 1000  # 简化估算
-                update_signal_status(self.sell_time, "sell", signal_result, daot_profit)
-                # 评估完成后关闭追踪
-                self.sell_active = False
-                self.sell_window_min_price = None  # 清理窗口追踪
-                # 智能冷却解锁
-                self.last_signal_bar = total_bars - 1 - COOLDOWN_BARS
-                self.logger.info(f"🔓 90分钟窗口评估结束，冷却期解锁")
+        # v15.3: 90分钟窗口评估
+        if total_bars is not None and self.sell_stop_loss_triggered and not self.sell_eval_notified:
+            window_min = self.sell_window_min_price if self.sell_window_min_price is not None else current_price
+            if self._do_window_evaluation(
+                signal_type='倒T',
+                window_price=window_min,
+                threshold=self.sell_price - 0.25,
+                is_greater_than=False,
+                signal_time=self.sell_time,
+                direction='sell',
+                signal_price=self.sell_price,
+                total_bars=total_bars,
+                signal_bar=self.sell_signal_bar,
+                eval_notified_attr='sell_eval_notified',
+                active_attr='sell_active',
+                window_price_attr='sell_window_min_price',
+                success_profit_calc=lambda: (self.sell_price - current_price) * 1000
+            ):
                 return
+
+        # 评估完成后关闭追踪（未触发止损也到期的情况）
+        if self.sell_eval_notified:
+            return
 
     def check_zhengt_sell_and_stoploss(self, current_price, current_time, total_bars=None):
         """正T买入后追踪：卖出提醒 + 90分钟窗口评估（v15.3：止损不终止追踪，90分钟后评估信号成败）"""
@@ -1912,40 +1985,30 @@ class PAMonitor:
             # 注意：不再关闭 zhengt_buy_active，也不解锁冷却期
             return
 
-        # v15.3: 90分钟窗口评估——止损触发后，窗口到期时评估信号最终成败
-        if self.zhengt_stop_loss_triggered and not self.zhengt_eval_notified and total_bars is not None:
-            elapsed_bars = total_bars - self.zhengt_signal_bar
-            if elapsed_bars >= EVAL_WINDOW_BARS:
-                # 90分钟窗口到期：检查窗口内最高价是否高于买入价+0.20元
-                self.zhengt_eval_notified = True
-                window_max = self.zhengt_window_max_price if self.zhengt_window_max_price is not None else current_price
-                self.logger.info(f"🔍 正T窗口评估：买入价={self.zhengt_buy_price}，窗口最高价={window_max}，阈值={self.zhengt_buy_price + 0.20:.3f}")
-                if window_max >= self.zhengt_buy_price + 0.20:
-                    result_msg = "✅ 信号理论有效（窗口内曾反弹≥0.20元）"
-                    signal_result = "成功"
-                else:
-                    result_msg = "❌ 信号理论失败（90分钟窗口内未反弹≥0.20元）"
-                    signal_result = "失败"
-                msg = (
-                    f"📋 正T 90分钟窗口评估\n\n"
-                    f"买入价：{self.zhengt_buy_price}元（{self.zhengt_buy_time}）\n"
-                    f"窗口最高价：{window_max}元\n"
-                    f"止损触发：{'是' if self.zhengt_stop_loss_triggered else '否'}\n\n"
-                    f"评估结果：{result_msg}\n"
-                    f"（评估标准：90分钟内最高价 > 买入价+0.20元）"
-                )
-                notify(f"📋 正T窗口评估 — {signal_result}", msg, level="info")
-                self.logger.info(f"📋 正T90分钟窗口评估：{result_msg}")
-                # 更新信号历史状态
-                zhengt_profit = (current_price - self.zhengt_buy_price) * 1000 if signal_result == "成功" else -0.15 * 1000  # 简化估算
-                update_signal_status(self.zhengt_buy_time, "buy", signal_result, zhengt_profit)
-                # 评估完成后关闭追踪
-                self.zhengt_buy_active = False
-                self.zhengt_window_max_price = None  # 清理窗口追踪
-                # 智能冷却解锁
-                self.last_zhengt_signal_bar = total_bars - 1 - COOLDOWN_BARS
-                self.logger.info(f"🔓 90分钟窗口评估结束，冷却期解锁")
+        # v15.3: 90分钟窗口评估
+        if total_bars is not None and self.zhengt_stop_loss_triggered and not self.zhengt_eval_notified:
+            window_max = self.zhengt_window_max_price if self.zhengt_window_max_price is not None else current_price
+            if self._do_window_evaluation(
+                signal_type='正T',
+                window_price=window_max,
+                threshold=self.zhengt_buy_price + 0.20,
+                is_greater_than=True,
+                signal_time=self.zhengt_buy_time,
+                direction='buy',
+                signal_price=self.zhengt_buy_price,
+                total_bars=total_bars,
+                signal_bar=self.zhengt_signal_bar,
+                eval_notified_attr='zhengt_eval_notified',
+                active_attr='zhengt_buy_active',
+                window_price_attr='zhengt_window_max_price',
+                success_profit_calc=lambda: (current_price - self.zhengt_buy_price) * 1000
+            ):
                 return
+
+        # 评估完成后关闭追踪（未触发止损也到期的情况）
+        if self.zhengt_eval_notified:
+            return
+
 
     def _check_daot_signals(self, df, completed, total_bars):
         """
