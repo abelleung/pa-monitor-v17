@@ -1050,7 +1050,7 @@ def check_zhengT_buy_signal(row, logger, amplitude=0, boll_width=0):
         '日均价': round(avg_price, 2),
         '偏离均价': round(price_diff, 3),
         '日振幅': round(amplitude, 2),
-        'BOLL带宽%': round(boll_width, 2),
+        'BOLL带宽': round(boll_width, 2),
     }
 
     # v16.1 极低位高胜率组合（4条件 + 2硬约束）
@@ -2670,7 +2670,7 @@ class PAMonitor:
                         f"成交额 {zhengt_details.get('成交额万', 0):.0f}万 ≥ {ZHENGT_AMOUNT_THRESH_WAN}万",
                         f"涨跌 {zhengt_details.get('涨跌', 0):.1f} ≤ {ZHENGT_ZD_THRESH}",
                         f"日振幅 {zhengt_details.get('日振幅', 0):.2f} ≥ {ZHENGT_MIN_AMPLITUDE}元",
-                        f"BOLL带宽 {zhengt_details.get('BOLL带宽%', 0):.2f}% > {ZHENGT_MIN_BOLL_WIDTH}%",
+                        f"BOLL带宽 {zhengt_details.get('BOLL带宽', 0):.2f}元 > {ZHENGT_MIN_BOLL_WIDTH}元",
                     ]
                     zhengt_cond_marks = ["✅" if c else "❌" for c in zhengt_details.get('满足条件', [])]
                     

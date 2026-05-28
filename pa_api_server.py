@@ -15,17 +15,27 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-DATA_DIR = "/opt/pa-monitor/monitor_data"
-LOG_DIR = "/opt/pa-monitor/monitor_logs"
+# 配置路径
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "monitor_config.json")
+
+def load_config():
+    if os.path.exists(CONFIG_PATH):
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+config = load_config()
+DATA_DIR = config.get("data_dir", "/opt/pa-monitor/monitor_data")
+LOG_DIR = config.get("log_dir", "/opt/pa-monitor/monitor_logs")
 CHART_DIR = "/opt/pa-monitor/daily_charts"
 
 # ============================================================
 # 信号记录文件（每天追加，格式：时间戳|信号类型|方向|价格|状态）
 # ============================================================
-SIGNAL_LOG = "/opt/pa-monitor/monitor_data/signal_history.json"
+SIGNAL_LOG = os.path.join(DATA_DIR, "signal_history.json")
 
 # 累计交易统计文件
-TRADE_STATS = "/opt/pa-monitor/monitor_data/trade_stats.json"
+TRADE_STATS = os.path.join(DATA_DIR, "trade_stats.json")
 
 # 默认交易统计数据（基于v16.1.2回测结果，后续实盘会覆盖）
 DEFAULT_TRADE_STATS = {

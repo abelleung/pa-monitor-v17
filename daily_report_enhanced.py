@@ -359,13 +359,15 @@ def analyze_strategy_conditions(df: pd.DataFrame) -> dict:
         # 冲高回落
         '冲高_额≥3000万': 0,
         '冲高_高价>均价+0.1': 0,
-        # 正T（v15.0新条件）
-        '正T_涨跌<0': 0,
+        # 正T（v15.0新条件，6条件）
+        '正T_涨跌≤0': 0,
         '正T_风险<10': 0,
         '正T_额≥5000万': 0,
         '正T_偏离>0.40': 0,
         '正T_振幅≥0.80': 0,
-        '正T_满足4+/5': 0,
+        '正T_BOLL带宽>1.0': 0,
+        '正T_满足4+/6': 0,
+        '正T_满足5+/6': 0,
         '正T_全部满足': 0,
     }
     
@@ -388,9 +390,10 @@ def analyze_strategy_conditions(df: pd.DataFrame) -> dict:
         boll_lower = float(row['BOLL下轨']) if not pd.isna(row['BOLL下轨']) else 0
         zhangdie = float(row.get('涨跌', 0)) if not pd.isna(row.get('涨跌', 0)) else 0
         fengxian = float(row.get('风险', 0)) if not pd.isna(row.get('风险', 0)) else 0
-        
+
         price_diff = price - avg_price
         high_diff = high - avg_price
+        boll_width = float(row.get('BOLL带宽', 0)) if not pd.isna(row.get('BOLL带宽', 0)) else 0
         
         # ===== 动量卖出 =====
         m_cond1 = zhangdie > MOM_ZD_THRESH
@@ -441,23 +444,26 @@ def analyze_strategy_conditions(df: pd.DataFrame) -> dict:
         # 但在pa_monitor.py中条件是 price_diff > ZHENGT_MA_BELOW（用绝对偏离）
         # 这里为统一显示，用price低于均价的绝对偏离来计算
         price_deviation = avg_price - price  # 正值=低于均价
-        t_cond1 = zhangdie < ZHENGT_ZD_THRESH                # 涨跌 < 0
+        t_cond1 = zhangdie <= ZHENGT_ZD_THRESH               # 涨跌 ≤ 0（与pa_monitor.py cond4对齐）
         t_cond2 = fengxian < ZHENGT_RISK_THRESH              # 风险 < 10
         t_cond3 = amount_wan >= ZHENGT_AMOUNT_THRESH_WAN     # 额 ≥ 5000万
         t_cond4 = price_deviation > ZHENGT_MA_BELOW          # 偏离均价 > 0.40元
         # v15.3.1修复：使用全天真实日振幅（与pa_monitor.py盘中计算方式一致）
         bar_amplitude = day_amplitude
-        t_cond5 = bar_amplitude >= ZHENGT_MIN_AMPLITUDE       # 振幅 ≥ 0.80元（近似）
+        t_cond5 = bar_amplitude >= ZHENGT_MIN_AMPLITUDE       # 振幅 ≥ 0.80元
+        t_cond6 = boll_width > ZHENGT_MIN_BOLL_WIDTH        # BOLL带宽 > 1.0元（与pa_monitor.py cond6对齐）
 
-        if t_cond1: results['正T_涨跌<0'] += 1
+        if t_cond1: results['正T_涨跌≤0'] += 1
         if t_cond2: results['正T_风险<10'] += 1
         if t_cond3: results['正T_额≥5000万'] += 1
         if t_cond4: results['正T_偏离>0.40'] += 1
         if t_cond5: results['正T_振幅≥0.80'] += 1
-        
-        t_count = sum([t_cond1, t_cond2, t_cond3, t_cond4, t_cond5])
-        if t_count >= 4: results['正T_满足4+/5'] += 1
-        if t_count >= 5: results['正T_全部满足'] += 1
+        if t_cond6: results['正T_BOLL带宽>1.0'] += 1
+
+        t_count = sum([t_cond1, t_cond2, t_cond3, t_cond4, t_cond5, t_cond6])
+        if t_count >= 4: results['正T_满足4+/6'] += 1
+        if t_count >= 5: results['正T_满足5+/6'] += 1
+        if t_count >= 6: results['正T_全部满足'] += 1
         
         # 收集接近信号（任一策略≥4条件）
         best_count = max(m_count, b_count, t_count)
