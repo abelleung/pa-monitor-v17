@@ -249,6 +249,15 @@ def save_signal_to_history(signal_data: dict):
         logging.getLogger(__name__).error(f"写入信号历史失败: {e}")
 
 
+def safe_float(value, default=0.0):
+    """安全转换为float，NaN/None/异常返回默认值"""
+    try:
+        v = float(value)
+        return v if not np.isnan(v) else default
+    except (ValueError, TypeError):
+        return default
+
+
 def update_signal_status(signal_time: str, direction: str, status: str, profit: float = 0):
     """更新signal_history中指定信号的状态和盈亏（90分钟窗口评估后调用）"""
     try:
@@ -920,7 +929,7 @@ def is_trade_time(time_str):
 def check_boll_sell_signal(row, logger):
     """
     【v14.0补充策略】BOLL上轨倒T卖出信号（去掉带宽条件）
-    
+
     v14.0改动：移除BOLL带宽条件（59天穷举证明1分钟线上带宽无筛选价值）
     条件（全部满足才触发）：
     1. 最高价 ≥ BOLL上轨 × 0.995（触碰上轨）
@@ -928,16 +937,16 @@ def check_boll_sell_signal(row, logger):
     3. 收盘价 > 日均价 + 0.1元
     4. 偏离日均价 > 0.3元
     5. MACD柱 > 0.06
-    
+
     返回: (是否触发, 详情dict)
     """
-    price = float(row['收盘'])
-    high = float(row['最高']) if not np.isnan(row['最高']) else 0
-    amount_wan = float(row['成交额_万']) if not np.isnan(row.get('成交额_万', np.nan)) else 0
-    avg_price = float(row['日均价']) if not np.isnan(row['日均价']) else 0
-    macd_bar = float(row['MACD柱']) if not np.isnan(row['MACD柱']) else 0
-    boll_upper = float(row['BOLL上轨']) if not np.isnan(row['BOLL上轨']) else 0
-    boll_width = float(row['BOLL带宽']) if not np.isnan(row['BOLL带宽']) else 0
+    price = safe_float(row['收盘'])
+    high = safe_float(row['最高'])
+    amount_wan = safe_float(row.get('成交额_万'), 0)
+    avg_price = safe_float(row['日均价'])
+    macd_bar = safe_float(row['MACD柱'])
+    boll_upper = safe_float(row['BOLL上轨'])
+    boll_width = safe_float(row['BOLL带宽'])
     
     price_diff = price - avg_price  # 偏离日均价
     
@@ -976,22 +985,22 @@ def check_momentum_sell_signal(row, logger):
     """
     【v14.0主力策略】动量倒T卖出信号（恢复v10.2逻辑）
     回测基础：2026-01-05至2026-04-03，59天，62信号，80.6%胜率（0.25元目标）
-    
+
     条件（全部满足才触发）：
     1. 涨跌 > 100
     2. 风险 > 85
     3. 成交额 ≥ 3000万
     4. 股价 > 日均价 + 0.1元
     5. |MACD柱| > 0.06
-    
+
     返回: (是否触发, 详情dict)
     """
-    price = float(row['收盘'])
-    zhangdie = float(row['涨跌']) if not np.isnan(row['涨跌']) else 0
-    fengxian = float(row['风险']) if not np.isnan(row['风险']) else 0
-    amount_wan = float(row['成交额_万']) if not np.isnan(row.get('成交额_万', np.nan)) else 0
-    avg_price = float(row['日均价']) if not np.isnan(row['日均价']) else 0
-    macd_bar = float(row['MACD柱']) if not np.isnan(row['MACD柱']) else 0
+    price = safe_float(row['收盘'])
+    zhangdie = safe_float(row['涨跌'])
+    fengxian = safe_float(row['风险'])
+    amount_wan = safe_float(row.get('成交额_万'), 0)
+    avg_price = safe_float(row['日均价'])
+    macd_bar = safe_float(row['MACD柱'])
     price_diff = price - avg_price
     macd_abs = abs(macd_bar)
 
@@ -1034,11 +1043,11 @@ def check_zhengT_buy_signal(row, logger, amplitude=0, boll_width=0):
     BOLL>1%是最大胜率提升器（+10pp），过滤极窄带宽日的无效信号
     返回: (是否触发, 详情dict)
     """
-    price = float(row['收盘'])
-    zhangdie = float(row['涨跌']) if not np.isnan(row['涨跌']) else 0
-    fengxian = float(row['风险']) if not np.isnan(row['风险']) else 0
-    amount_wan = float(row['成交额_万']) if not np.isnan(row.get('成交额_万', np.nan)) else 0
-    avg_price = float(row['日均价']) if not np.isnan(row['日均价']) else 0
+    price = safe_float(row['收盘'])
+    zhangdie = safe_float(row['涨跌'])
+    fengxian = safe_float(row['风险'])
+    amount_wan = safe_float(row.get('成交额_万'), 0)
+    avg_price = safe_float(row['日均价'])
     price_diff = avg_price - price  # 正T：均价 - 股价（要求低于均价越多越好）
 
     details = {
@@ -1100,12 +1109,12 @@ def check_pullback_sell_signal(df, current_idx, logger, day_high=0):
     
     current = df.iloc[current_idx]
     
-    price = float(current['收盘'])
-    high = float(current['最高']) if not np.isnan(current['最高']) else 0
-    amount_wan = float(current['成交额_万']) if not np.isnan(current.get('成交额_万', np.nan)) else 0
-    avg_price = float(current['日均价']) if not np.isnan(current['日均价']) else 0
-    boll_upper = float(current['BOLL上轨']) if not np.isnan(current['BOLL上轨']) else 0
-    boll_width = float(current['BOLL带宽']) if not np.isnan(current['BOLL带宽']) else 0
+    price = safe_float(current['收盘'])
+    high = safe_float(current['最高'])
+    amount_wan = safe_float(current.get('成交额_万'), 0)
+    avg_price = safe_float(current['日均价'])
+    boll_upper = safe_float(current['BOLL上轨'])
+    boll_width = safe_float(current['BOLL带宽'])
     time_str = str(current['时间'])
 
     # 使用主循环传入的盘中最高价
@@ -1276,8 +1285,8 @@ def estimate_daily_amount_and_amplitude(df, prev_close=0, open_price=0):
     estimated_daily_yi = estimated_daily_wan / 10000  # 转亿元
     
     # 计算实际已发生振幅（当前最高价-最低价）
-    actual_high = float(today_df['最高'].max()) if not np.isnan(today_df['最高'].max()) else 0
-    actual_low = float(today_df['最低'].min()) if not np.isnan(today_df['最低'].min()) else 99999
+    actual_high = safe_float(today_df['最高'].max())
+    actual_low = safe_float(today_df['最低'].min(), 99999)
     actual_amplitude = actual_high - actual_low if actual_high > 0 and actual_low < 99999 else 0
     
     # 振幅预估（基于成交额）
@@ -2167,9 +2176,9 @@ class PAMonitor:
                                     today_df = df_closing[df_closing['时间'].astype(str).str.startswith(today_str)]
                                     if len(today_df) > 0:
                                         actual_amount_yi = float(today_df["成交额"].sum()) / 100000000  # 转亿元
-                                        actual_high = float(today_df['最高'].max())
-                                        actual_low = float(today_df['最低'].min())
-                                        actual_amp = actual_high - actual_low
+                                        actual_high = safe_float(today_df['最高'].max())
+                                        actual_low = safe_float(today_df['最低'].min(), 99999)
+                                        actual_amp = actual_high - actual_low if actual_high > 0 and actual_low < 99999 else 0
                                         est_bark_for_heartbeat = (
                                             f"\n\n📊 收盘统计\n"
                                             f"全天成交：{actual_amount_yi:.1f}亿\n"
@@ -2272,15 +2281,15 @@ class PAMonitor:
                 # v11.6: 数据拉取成功后，更新缓存指标供下次心跳使用
                 if loop_count <= 5:
                     self.logger.info(f"[#{loop_count}] 开始更新缓存...")
-                hb_cache['price'] = float(completed['收盘'])
-                hb_cache['zd'] = float(completed['涨跌']) if not np.isnan(completed['涨跌']) else hb_cache.get('zd', 0)
-                hb_cache['fx'] = float(completed['风险']) if not np.isnan(completed['风险']) else hb_cache.get('fx', 0)
-                hb_cache['amt'] = float(completed['成交额_万']) if not np.isnan(completed.get('成交额_万', np.nan)) else hb_cache.get('amt', 0)
-                hb_cache['macd'] = float(completed['MACD柱']) if not np.isnan(completed.get('MACD柱', np.nan)) else hb_cache.get('macd', 0)
-                hb_cache['maimai'] = float(completed['买卖力道']) if not np.isnan(completed.get('买卖力道', np.nan)) else hb_cache.get('maimai', 0)
+                hb_cache['price'] = safe_float(completed['收盘'])
+                hb_cache['zd'] = safe_float(completed['涨跌'], hb_cache.get('zd', 0))
+                hb_cache['fx'] = safe_float(completed['风险'], hb_cache.get('fx', 0))
+                hb_cache['amt'] = safe_float(completed.get('成交额_万'), hb_cache.get('amt', 0))
+                hb_cache['macd'] = safe_float(completed.get('MACD柱'), hb_cache.get('macd', 0))
+                hb_cache['maimai'] = safe_float(completed.get('买卖力道'), hb_cache.get('maimai', 0))
                 # v13.0: 增加BOLL指标缓存
-                hb_cache['boll_up'] = float(completed['BOLL上轨']) if not np.isnan(completed.get('BOLL上轨', np.nan)) else hb_cache.get('boll_up', 0)
-                hb_cache['boll_width'] = float(completed['BOLL带宽']) if not np.isnan(completed.get('BOLL带宽', np.nan)) else hb_cache.get('boll_width', 0)
+                hb_cache['boll_up'] = safe_float(completed.get('BOLL上轨'), hb_cache.get('boll_up', 0))
+                hb_cache['boll_width'] = safe_float(completed.get('BOLL带宽'), hb_cache.get('boll_width', 0))
 
                 # v11.6: 每次数据拉取成功后计算量能预估并缓存
                 est = estimate_daily_amount_and_amplitude(
@@ -2332,11 +2341,11 @@ class PAMonitor:
                 # 更新每日统计（用最新K线的实际值）
                 current_price = float(latest['收盘'])
                 current_high = float(latest['最高'])
-                current_low = float(latest['最低'])
-                amount_val = float(latest['成交额_万'])
-                boll_upper_val = float(latest['BOLL上轨']) if not np.isnan(latest.get('BOLL上轨', np.nan)) else 0
-                boll_width_val = float(latest['BOLL带宽']) if not np.isnan(latest.get('BOLL带宽', np.nan)) else 0
-                macd_val = float(latest['MACD柱']) if not np.isnan(latest.get('MACD柱', np.nan)) else 0
+                current_low = safe_float(latest['最低'])
+                amount_val = safe_float(latest.get('成交额_万'), 0)
+                boll_upper_val = safe_float(latest.get('BOLL上轨'), 0)
+                boll_width_val = safe_float(latest.get('BOLL带宽'), 0)
+                macd_val = safe_float(latest.get('MACD柱'), 0)
                 self.daily_stats['max_boll_upper'] = max(self.daily_stats['max_boll_upper'], boll_upper_val)
                 self.daily_stats['max_boll_width'] = max(self.daily_stats['max_boll_width'], boll_width_val)
                 self.daily_stats['max_macd'] = max(self.daily_stats['max_macd'], macd_val)
@@ -2358,12 +2367,12 @@ class PAMonitor:
                     '时间': latest_time,
                     '开盘': float(latest['开盘']),
                     '收盘': current_price,
-                    '最高': float(latest['最高']),
-                    '最低': float(latest['最低']),
+                    '最高': safe_float(latest['最高']),
+                    '最低': safe_float(latest['最低']),
                     '成交量': int(latest['成交量']),
-                    '成交额': float(latest['成交额']),
-                    '涨跌': round(float(latest['涨跌']), 1) if not np.isnan(latest.get('涨跌', np.nan)) else 0,
-                    '风险': round(float(latest['风险']), 0) if not np.isnan(latest.get('风险', np.nan)) else 0,
+                    '成交额': safe_float(latest['成交额']),
+                    '涨跌': round(safe_float(latest['涨跌']), 1),
+                    '风险': round(safe_float(latest['风险']), 0),
                     '成交额_万': round(amount_val, 0),
                 }
                 # MACD
@@ -2435,7 +2444,7 @@ class PAMonitor:
                         boll_triggered, boll_details = check_boll_sell_signal(completed, self.logger)
                 
                     # 策略3: 冲高回落策略（低波动日备用，仅前两个策略都未触发时检查）
-                    current_bandwidth = float(completed['BOLL带宽']) if not np.isnan(completed['BOLL带宽']) else 0
+                    current_bandwidth = safe_float(completed['BOLL带宽'])
                     is_low_volatility = current_bandwidth < PULLBACK_BANDWIDTH_THRESH
                 
                     pullback_triggered = False
@@ -2495,7 +2504,7 @@ class PAMonitor:
                                 current_amplitude = hp - lp
                             if current_amplitude > 100 or current_amplitude < 0:  # 异常值保护（过大或负数）
                                 current_amplitude = 0
-                            current_boll_width = float(completed['BOLL带宽']) if not np.isnan(completed.get('BOLL带宽', np.nan)) else 0
+                            current_boll_width = safe_float(completed.get('BOLL带宽'), 0)
                             zhengt_triggered, zhengt_details = check_zhengT_buy_signal(completed, self.logger, amplitude=current_amplitude, boll_width=current_boll_width)
 
                 # 提前计算量能预估（供倒T和正T信号共用）
