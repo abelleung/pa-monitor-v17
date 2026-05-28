@@ -932,8 +932,8 @@ def check_boll_sell_signal(row, logger):
     返回: (是否触发, 详情dict)
     """
     price = float(row['收盘'])
-    high = float(row['最高'])
-    amount_wan = float(row['成交额_万'])
+    high = float(row['最高']) if not np.isnan(row['最高']) else 0
+    amount_wan = float(row['成交额_万']) if not np.isnan(row.get('成交额_万', np.nan)) else 0
     avg_price = float(row['日均价']) if not np.isnan(row['日均价']) else 0
     macd_bar = float(row['MACD柱']) if not np.isnan(row['MACD柱']) else 0
     boll_upper = float(row['BOLL上轨']) if not np.isnan(row['BOLL上轨']) else 0
@@ -989,7 +989,7 @@ def check_momentum_sell_signal(row, logger):
     price = float(row['收盘'])
     zhangdie = float(row['涨跌']) if not np.isnan(row['涨跌']) else 0
     fengxian = float(row['风险']) if not np.isnan(row['风险']) else 0
-    amount_wan = float(row['成交额_万'])
+    amount_wan = float(row['成交额_万']) if not np.isnan(row.get('成交额_万', np.nan)) else 0
     avg_price = float(row['日均价']) if not np.isnan(row['日均价']) else 0
     macd_bar = float(row['MACD柱']) if not np.isnan(row['MACD柱']) else 0
     price_diff = price - avg_price
@@ -1037,7 +1037,7 @@ def check_zhengT_buy_signal(row, logger, amplitude=0, boll_width=0):
     price = float(row['收盘'])
     zhangdie = float(row['涨跌']) if not np.isnan(row['涨跌']) else 0
     fengxian = float(row['风险']) if not np.isnan(row['风险']) else 0
-    amount_wan = float(row['成交额_万'])
+    amount_wan = float(row['成交额_万']) if not np.isnan(row.get('成交额_万', np.nan)) else 0
     avg_price = float(row['日均价']) if not np.isnan(row['日均价']) else 0
     price_diff = avg_price - price  # 正T：均价 - 股价（要求低于均价越多越好）
 
@@ -1101,8 +1101,8 @@ def check_pullback_sell_signal(df, current_idx, logger, day_high=0):
     current = df.iloc[current_idx]
     
     price = float(current['收盘'])
-    high = float(current['最高'])
-    amount_wan = float(current['成交额_万'])
+    high = float(current['最高']) if not np.isnan(current['最高']) else 0
+    amount_wan = float(current['成交额_万']) if not np.isnan(current.get('成交额_万', np.nan)) else 0
     avg_price = float(current['日均价']) if not np.isnan(current['日均价']) else 0
     boll_upper = float(current['BOLL上轨']) if not np.isnan(current['BOLL上轨']) else 0
     boll_width = float(current['BOLL带宽']) if not np.isnan(current['BOLL带宽']) else 0
@@ -1276,9 +1276,9 @@ def estimate_daily_amount_and_amplitude(df, prev_close=0, open_price=0):
     estimated_daily_yi = estimated_daily_wan / 10000  # 转亿元
     
     # 计算实际已发生振幅（当前最高价-最低价）
-    actual_high = float(today_df['最高'].max())
-    actual_low = float(today_df['最低'].min())
-    actual_amplitude = actual_high - actual_low
+    actual_high = float(today_df['最高'].max()) if not np.isnan(today_df['最高'].max()) else 0
+    actual_low = float(today_df['最低'].min()) if not np.isnan(today_df['最低'].min()) else 99999
+    actual_amplitude = actual_high - actual_low if actual_high > 0 and actual_low < 99999 else 0
     
     # 振幅预估（基于成交额）
     estimated_amplitude_from_volume = AMP_SLOPE * estimated_daily_yi + AMP_INTERCEPT
