@@ -167,19 +167,19 @@ def run_full_test(csv_file='平安1-5月_回测数据_2026.csv', speed=10000):
             monitor.zhengt_stop_loss_triggered = True
             monitor.logger.info(f"正T止损触发：当前价{current_price} < 止损{monitor.zhengt_stop_loss_price}，继续追踪至15:00")
 
-        # 当天15:00收盘评估（仅推送结果，不影响任何状态）
+        # 当天15:00收盘评估（用最大价差判断，不影响任何状态）
         if not monitor.zhengt_eval_notified and monitor.zhengt_signal_bar > 0:
             t_str = str(latest_time)
             if len(t_str) >= 13:
                 hour = int(t_str[11:13])
-                minute = int(t_str[14:16])
-                if hour > 15 or (hour == 15 and minute >= 0):
+                if hour > 15 or (hour == 15 and int(t_str[14:16]) >= 0):
                     monitor.zhengt_eval_notified = True
                     window_max = monitor.zhengt_window_max_price if monitor.zhengt_window_max_price is not None else current_price
-                    if window_max >= monitor.zhengt_buy_price + STRATEGY_CONFIG['ZHENGT_TARGET_DIFF']:
-                        monitor.logger.info(f"正T收盘评估(15:00)：成功（窗口最高{window_max:.2f} >= {monitor.zhengt_buy_price + STRATEGY_CONFIG['ZHENGT_TARGET_DIFF']:.2f}）")
+                    max_spread = window_max - monitor.zhengt_buy_price  # 正T最大价差 = 最高 - 买入价
+                    if max_spread >= STRATEGY_CONFIG['ZHENGT_TARGET_DIFF']:
+                        monitor.logger.info(f"正T收盘评估(15:00)：成功（最大价差{max_spread:.2f} >= {STRATEGY_CONFIG['ZHENGT_TARGET_DIFF']}）")
                     else:
-                        monitor.logger.info(f"正T收盘评估(15:00)：失败（窗口最高{window_max:.2f} < {monitor.zhengt_buy_price + STRATEGY_CONFIG['ZHENGT_TARGET_DIFF']:.2f}）")
+                        monitor.logger.info(f"正T收盘评估(15:00)：失败（最大价差{max_spread:.2f} < {STRATEGY_CONFIG['ZHENGT_TARGET_DIFF']}）")
 
         time.sleep(0.001)
 
