@@ -1,17 +1,11 @@
 """
-v16.5 四种策略测试脚本
+v16.5 四种策略测试脚本（含90分钟窗口评估）
 必须与实际代码（strategies.py + pa_monitor.py）保持一致
 """
 import sys
 sys.path.insert(0, '.')
 
 from pa_monitor import PAMonitor
-from strategies import (
-    check_momentum_sell_signal,
-    check_boll_sell_signal,
-    check_pullback_sell_signal,
-    check_zhengT_buy_signal,
-)
 from indicators import STRATEGY_CONFIG
 import time
 
@@ -36,7 +30,7 @@ def run_full_test(csv_file='平安1-5月_回测数据_2026.csv', speed=10000):
     monitor.zhengt_eval_notified = False
 
     print('=' * 60)
-    print('v16.5 四种策略完整测试')
+    print('v16.5 四种策略完整测试（含90分钟窗口评估）')
     print('=' * 60)
 
     counts = {
@@ -77,7 +71,6 @@ def run_full_test(csv_file='平安1-5月_回测数据_2026.csv', speed=10000):
             monitor.daily_stats['low_price'] = min(monitor.daily_stats['low_price'], current_low)
 
         # ===== 倒T信号检查 =====
-        # 冷却期检查
         in_cooldown = (total_bars - 1 - monitor.last_signal_bar) < STRATEGY_CONFIG['COOLDOWN_BARS']
 
         if not in_cooldown:
@@ -90,6 +83,8 @@ def run_full_test(csv_file='平安1-5月_回测数据_2026.csv', speed=10000):
                     in_cooldown = True  # 跳过本次
 
             if not in_cooldown:
+                from strategies import check_momentum_sell_signal, check_boll_sell_signal, check_pullback_sell_signal
+
                 # 策略1: 动量
                 momentum_triggered, momentum_details = check_momentum_sell_signal(completed, monitor.logger)
 
@@ -143,26 +138,62 @@ def run_full_test(csv_file='平安1-5月_回测数据_2026.csv', speed=10000):
             monitor.zhengt_buy_price = completed['收盘']
             monitor.zhengt_buy_time = latest_time
             monitor.zhengt_signal_count_today += 1
-            monitor.zhengt_target_sell_price = STRATEGY_CONFIG['ZHENGT_TARGET_DIFF']
-            monitor.zhengt_stop_loss_price = STRATEGY_CONFIG['ZHENGT_STOP_LOSS_DIFF']
-            monitor.zhengt_window_max_price = None
+            monitor.zhengt_target_sell_price = round(completed['收盘'] + STRATEGY_CONFIG['ZHENGT_TARGET_DIFF'], 2)
+            monitor.zhengt_stop_loss_price = round(completed['收盘'] - STRATEGY_CONFIG['ZHENGT_STOP_LOSS_DIFF'], 2)
+            monitor.zhengt_window_max_price = completed['收盘']
+            monitor.zhengt_sell_notified = False
+            monitor.zhengt_stop_loss_triggered = False
+            monitor.zhengt_signal_bar = total_bars - 1
+            monitor.zhengt_eval_notified = False
 
-        # 正T卖出追踪
+        # 正T卖出追踪 + 90分钟窗口评估（与 pa_monitor.py _check_zhengt_sell_and_stoploss 一致）
         if monitor.zhengt_buy_active:
             current_price = completed['收盘']
+            # 更新窗口内最高价
+            if monitor.zhengt_window_max_price is None or current_price > monitor.zhengt_window_max_price:
+                monitor.zhengt_window_max_price = current_price
+
+            # 到达目标卖出价（成功）
             if not monitor.zhengt_sell_notified and current_price >= monitor.zhengt_target_sell_price:
                 counts['正T卖出'] += 1
                 monitor.zhengt_sell_notified = True
+                profit = current_price - monitor.zhengt_buy_price
                 monitor.zhengt_buy_active = False
-                monitor.last_zhengt_signal_bar = total_bars - 1 - 30
+                monitor.zhengt_window_max_price = None
+                monitor.last_zhengt_signal_bar = total_bars - 1 - STRATEGY_CONFIG['COOLDOWN_BARS']
                 if len(examples['正T卖出']) < 3:
                     examples['正T卖出'].append(f"{latest_time} 卖出={current_price:.2f}")
+
+            # 止损触发（不终止追踪，继续90分钟窗口评估）
+            elif not monitor.zhengt_stop_loss_triggered and current_price < monitor.zhengt_stop_loss_price:
+                monitor.zhengt_stop_loss_triggered = True
+                monitor.logger.info(f"正T止损触发：当前价{current_price} < 止损{monitor.zhengt_stop_loss_price}，继续90分钟窗口评估")
+
+            # v15.3: 90分钟窗口评估
+            elif monitor.zhengt_stop_loss_triggered and not monitor.zhengt_eval_notified:
+                elapsed = total_bars - monitor.zhengt_signal_bar
+                if elapsed >= STRATEGY_CONFIG['EVAL_WINDOW_BARS']:
+                    monitor.zhengt_eval_notified = True
+                    window_max = monitor.zhengt_window_max_price if monitor.zhengt_window_max_price is not None else current_price
+                    if window_max >= monitor.zhengt_buy_price + 0.20:
+                        monitor.logger.info(f"正T90分钟窗口评估：成功（窗口最高{window_max:.2f} >= {monitor.zhengt_buy_price + 0.20:.2f}）")
+                    else:
+                        monitor.logger.info(f"正T90分钟窗口评估：失败（窗口最高{window_max:.2f} < {monitor.zhengt_buy_price + 0.20:.2f}）")
+                    monitor.zhengt_buy_active = False
+                    monitor.zhengt_window_max_price = None
+                    monitor.last_zhengt_signal_bar = total_bars - 1 - STRATEGY_CONFIG['COOLDOWN_BARS']
+
+            # 评估完成（未触发止损也到期的情况）
+            elif monitor.zhengt_eval_notified:
+                monitor.zhengt_buy_active = False
+                monitor.zhengt_window_max_price = None
+                monitor.last_zhengt_signal_bar = total_bars - 1 - STRATEGY_CONFIG['COOLDOWN_BARS']
 
         time.sleep(0.001)
 
     print()
     print('=' * 60)
-    print('v16.5 测试结果（94个交易日）:')
+    print('v16.5 测试结果（94个交易日，含90分钟窗口评估）:')
     print('=' * 60)
     for strategy, count in counts.items():
         print(f'{strategy}: {count} 次')
