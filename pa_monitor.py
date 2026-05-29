@@ -1267,16 +1267,12 @@ class PAMonitor:
             profit = -0.15 * 1000  # 简化估算
         update_signal_status(signal_time, direction, signal_result, profit)
 
-        # 重置追踪状态
-        setattr(self, active_attr, False)
+        # 重置追踪状态（仅清除窗口价格，不修改 active_attr 和冷却期）
+        # 说明：90分钟窗口仅做评估推送，不影响信号活跃状态和冷却期
+        #   - 正T: zhengt_buy_active 不在此处重置，由卖出成功或用户确认关闭
+        #   - 倒T: sell_active 同理
         setattr(self, window_price_attr, None)
-        # 智能冷却解锁
-        if direction == 'sell':
-            self.last_signal_bar = total_bars - 1 - STRATEGY_CONFIG['COOLDOWN_BARS']
-            self.logger.info(f"🔓 90分钟窗口评估结束，冷却期解锁")
-        else:
-            self.last_zhengt_signal_bar = total_bars - 1 - STRATEGY_CONFIG['COOLDOWN_BARS']
-            self.logger.info(f"🔓 90分钟窗口评估结束，正T冷却期解锁")
+        # 冷却期不在此处解锁，30分钟冷静期自然过期即可
 
         return True
 
@@ -1357,15 +1353,15 @@ class PAMonitor:
             return
 
     def check_zhengt_sell_and_stoploss(self, current_price, current_time, total_bars=None):
-        """正T买入后追踪：卖出提醒 + 90分钟窗口评估（v15.3：止损不终止追踪，90分钟后评估信号成败）"""
-        if not self.zhengt_buy_active:
-            return
-
+        """正T买入后追踪：卖出提醒 + 90分钟窗口评估
+        说明：90分钟窗口仅推送评估结果，不影响任何追踪状态
+              唯一制约下次正T触发的是 last_zhengt_signal_bar（30分钟冷静期）
+        """
         # v16.1.2 FIX: 更新90分钟窗口内最高价追踪
         if self.zhengt_window_max_price is None or current_price > self.zhengt_window_max_price:
             self.zhengt_window_max_price = current_price
 
-        # 到达目标卖出价（成功）
+        # 到达目标卖出价（推送提醒，不影响状态）
         if not self.zhengt_sell_notified and current_price >= self.zhengt_target_sell_price:
             self.zhengt_sell_notified = True
             diff = current_price - self.zhengt_buy_price
@@ -1379,17 +1375,11 @@ class PAMonitor:
             )
             notify("🎯 正T卖出提醒 — 到价了！", msg, level="remind")
             self.logger.info(f"🎯 正T卖出提醒：当前价{current_price} ≥ 目标{self.zhengt_target_sell_price}")
-            self.zhengt_buy_active = False
-            self.zhengt_window_max_price = None  # 清理窗口追踪
             # 更新信号历史状态：正T成功
             update_signal_status(self.zhengt_buy_time, "buy", "成功", diff * 1000)
-            # v15.2 智能冷却：信号完成（卖出成功），立即解锁冷却期
-            if total_bars is not None:
-                self.last_zhengt_signal_bar = total_bars - 1 - STRATEGY_CONFIG['COOLDOWN_BARS']
-                self.logger.info(f"🔓 智能冷却解锁：正T信号完成（卖出成功），冷却期立即解除")
             return
 
-        # v15.3: 正T风险提示（止损）——不再终止追踪，只做风险提示
+        # v15.3: 正T风险提示（止损）——只做风险提示，不影响状态
         if not self.zhengt_stop_loss_triggered and current_price < self.zhengt_stop_loss_price:
             self.zhengt_stop_loss_triggered = True
             msg = (
@@ -1404,31 +1394,28 @@ class PAMonitor:
             )
             notify("⚠️ 正T风险提示 — 仅供参考", msg, level="remind")
             self.logger.info(f"⚠️ 正T风险提示：当前价{current_price} < 止损{self.zhengt_stop_loss_price}，继续90分钟窗口评估")
-            # 注意：不再关闭 zhengt_buy_active，也不解锁冷却期
             return
 
-        # v15.3: 90分钟窗口评估
+        # v15.3: 90分钟窗口评估（仅推送结果，不影响任何状态）
         if total_bars is not None and self.zhengt_stop_loss_triggered and not self.zhengt_eval_notified:
             window_max = self.zhengt_window_max_price if self.zhengt_window_max_price is not None else current_price
-            if self._do_window_evaluation(
-                signal_type='正T',
-                window_price=window_max,
-                threshold=self.zhengt_buy_price + 0.20,
-                is_greater_than=True,
-                signal_time=self.zhengt_buy_time,
-                direction='buy',
-                signal_price=self.zhengt_buy_price,
-                total_bars=total_bars,
-                signal_bar=self.zhengt_signal_bar,
-                eval_notified_attr='zhengt_eval_notified',
-                active_attr='zhengt_buy_active',
-                window_price_attr='zhengt_window_max_price',
-                success_profit_calc=lambda: (current_price - self.zhengt_buy_price) * 1000
-            ):
-                return
-
-        # 评估完成后关闭追踪（未触发止损也到期的情况）
-        if self.zhengt_eval_notified:
+            elapsed = total_bars - self.zhengt_signal_bar
+            if elapsed >= STRATEGY_CONFIG['EVAL_WINDOW_BARS']:
+                self.zhengt_eval_notified = True
+                if window_max >= self.zhengt_buy_price + 0.20:
+                    result = "✅ 成功"
+                    self.logger.info(f"正T90分钟窗口评估：成功（窗口最高{window_max:.2f} >= {self.zhengt_buy_price + 0.20:.2f}）")
+                else:
+                    result = "❌ 失败"
+                    self.logger.info(f"正T90分钟窗口评估：失败（窗口最高{window_max:.2f} < {self.zhengt_buy_price + 0.20:.2f}）")
+                msg = (
+                    f"📋 正T 90分钟窗口评估\n\n"
+                    f"买入价：{self.zhengt_buy_price}元（{self.zhengt_buy_time}）\n"
+                    f"窗口最高：{window_max:.2f}元\n\n"
+                    f"评估结果：{result}\n"
+                    f"（评估标准：90分钟内最高 > 买入价+0.20）"
+                )
+                notify(f"📋 正T窗口评估 — {result}", msg, level="info")
             return
 
 
@@ -1508,11 +1495,9 @@ class PAMonitor:
         """
         检查正T买入信号
         返回: (triggered, details)
+        说明：仅用 last_zhengt_signal_bar 控制30分钟冷静期，不用 zhengt_buy_active 阻挡
         """
-        if self.zhengt_buy_active:
-            return False, None
-
-        # 正T独立冷却期
+        # 正T独立冷却期（30分钟）
         if (total_bars - 1 - self.last_zhengt_signal_bar) < STRATEGY_CONFIG['COOLDOWN_BARS']:
             return False, None
 

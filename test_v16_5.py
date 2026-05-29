@@ -129,12 +129,13 @@ def run_full_test(csv_file='平安1-5月_回测数据_2026.csv', speed=10000):
                     monitor.stop_loss_price = completed['收盘'] + STRATEGY_CONFIG['STOP_LOSS_DIFF']
 
         # ===== 正T买入检查 =====
+        # 说明：仅用 last_zhengt_signal_bar 控制30分钟冷静期，不用 zhengt_buy_active 阻挡
         zhengt_triggered, zhengt_details = monitor._check_zhengt_signals(df, completed, total_bars)
         if zhengt_triggered:
             counts['正T买入'] += 1
             if len(examples['正T买入']) < 3:
                 examples['正T买入'].append(f"{latest_time} 收盘={completed['收盘']:.2f}")
-            monitor.zhengt_buy_active = True
+            # 设置追踪状态（但不在意 zhengt_buy_active 阻挡下次触发）
             monitor.zhengt_buy_price = completed['收盘']
             monitor.zhengt_buy_time = latest_time
             monitor.zhengt_signal_count_today += 1
@@ -146,48 +147,38 @@ def run_full_test(csv_file='平安1-5月_回测数据_2026.csv', speed=10000):
             monitor.zhengt_signal_bar = total_bars - 1
             monitor.zhengt_eval_notified = False
 
-        # 正T卖出追踪 + 90分钟窗口评估（与 pa_monitor.py _check_zhengt_sell_and_stoploss 一致）
-        if monitor.zhengt_buy_active:
-            current_price = completed['收盘']
-            # 更新窗口内最高价
-            if monitor.zhengt_window_max_price is None or current_price > monitor.zhengt_window_max_price:
+        # 正T卖出追踪 + 90分钟窗口评估（与 pa_monitor.py 一致）
+        # 说明：90分钟仅评估推送，不影响任何状态；30分钟冷却期自然过期
+        current_price = completed['收盘']
+        # 更新窗口内最高价
+        if monitor.zhengt_window_max_price is not None:
+            if current_price > monitor.zhengt_window_max_price:
                 monitor.zhengt_window_max_price = current_price
+        elif monitor.zhengt_signal_bar > 0:
+            monitor.zhengt_window_max_price = current_price
 
-            # 到达目标卖出价（成功）
-            if not monitor.zhengt_sell_notified and current_price >= monitor.zhengt_target_sell_price:
-                counts['正T卖出'] += 1
-                monitor.zhengt_sell_notified = True
-                profit = current_price - monitor.zhengt_buy_price
-                monitor.zhengt_buy_active = False
-                monitor.zhengt_window_max_price = None
-                monitor.last_zhengt_signal_bar = total_bars - 1 - STRATEGY_CONFIG['COOLDOWN_BARS']
-                if len(examples['正T卖出']) < 3:
-                    examples['正T卖出'].append(f"{latest_time} 卖出={current_price:.2f}")
+        # 到达目标卖出价（推送提醒，不影响状态）
+        if not monitor.zhengt_sell_notified and monitor.zhengt_target_sell_price > 0 and current_price >= monitor.zhengt_target_sell_price:
+            counts['正T卖出'] += 1
+            monitor.zhengt_sell_notified = True
+            if len(examples['正T卖出']) < 3:
+                examples['正T卖出'].append(f"{latest_time} 卖出={current_price:.2f}")
 
-            # 止损触发（不终止追踪，继续90分钟窗口评估）
-            elif not monitor.zhengt_stop_loss_triggered and current_price < monitor.zhengt_stop_loss_price:
-                monitor.zhengt_stop_loss_triggered = True
-                monitor.logger.info(f"正T止损触发：当前价{current_price} < 止损{monitor.zhengt_stop_loss_price}，继续90分钟窗口评估")
+        # 止损触发（推送提醒，不影响状态）
+        if not monitor.zhengt_stop_loss_triggered and monitor.zhengt_stop_loss_price > 0 and current_price < monitor.zhengt_stop_loss_price:
+            monitor.zhengt_stop_loss_triggered = True
+            monitor.logger.info(f"正T止损触发：当前价{current_price} < 止损{monitor.zhengt_stop_loss_price}，继续90分钟窗口评估")
 
-            # v15.3: 90分钟窗口评估
-            elif monitor.zhengt_stop_loss_triggered and not monitor.zhengt_eval_notified:
-                elapsed = total_bars - monitor.zhengt_signal_bar
-                if elapsed >= STRATEGY_CONFIG['EVAL_WINDOW_BARS']:
-                    monitor.zhengt_eval_notified = True
-                    window_max = monitor.zhengt_window_max_price if monitor.zhengt_window_max_price is not None else current_price
-                    if window_max >= monitor.zhengt_buy_price + 0.20:
-                        monitor.logger.info(f"正T90分钟窗口评估：成功（窗口最高{window_max:.2f} >= {monitor.zhengt_buy_price + 0.20:.2f}）")
-                    else:
-                        monitor.logger.info(f"正T90分钟窗口评估：失败（窗口最高{window_max:.2f} < {monitor.zhengt_buy_price + 0.20:.2f}）")
-                    monitor.zhengt_buy_active = False
-                    monitor.zhengt_window_max_price = None
-                    monitor.last_zhengt_signal_bar = total_bars - 1 - STRATEGY_CONFIG['COOLDOWN_BARS']
-
-            # 评估完成（未触发止损也到期的情况）
-            elif monitor.zhengt_eval_notified:
-                monitor.zhengt_buy_active = False
-                monitor.zhengt_window_max_price = None
-                monitor.last_zhengt_signal_bar = total_bars - 1 - STRATEGY_CONFIG['COOLDOWN_BARS']
+        # 90分钟窗口评估（仅推送结果，不影响任何状态）
+        if monitor.zhengt_stop_loss_triggered and not monitor.zhengt_eval_notified and monitor.zhengt_signal_bar > 0:
+            elapsed = total_bars - monitor.zhengt_signal_bar
+            if elapsed >= STRATEGY_CONFIG['EVAL_WINDOW_BARS']:
+                monitor.zhengt_eval_notified = True
+                window_max = monitor.zhengt_window_max_price if monitor.zhengt_window_max_price is not None else current_price
+                if window_max >= monitor.zhengt_buy_price + 0.20:
+                    monitor.logger.info(f"正T90分钟窗口评估：成功（窗口最高{window_max:.2f} >= {monitor.zhengt_buy_price + 0.20:.2f}）")
+                else:
+                    monitor.logger.info(f"正T90分钟窗口评估：失败（窗口最高{window_max:.2f} < {monitor.zhengt_buy_price + 0.20:.2f}）")
 
         time.sleep(0.001)
 
