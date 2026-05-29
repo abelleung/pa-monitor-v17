@@ -105,8 +105,9 @@ def run_test_for_targets(csv_file='平安1-5月_回测数据_2026.csv', speed=10
         time.sleep(0.001)
 
     # ===== 对每种目标差价，计算15:00最大价差胜率 =====
+    # 评估窗口：触发后下一根K线 ~ 当天15:00（不含触发那根K线本身）
 
-    # 正T：最大价差 = 当天15:00前最高价 - 买入价
+    # 正T：最大价差 = 触发后最高价 - 买入价
     for signal in zhengt_signals:
         buy_bar = signal['bar']
         buy_price = signal['price']
@@ -115,10 +116,11 @@ def run_test_for_targets(csv_file='平安1-5月_回测数据_2026.csv', speed=10
 
         for t in ZHENGT_TARGETS:
             zhengt_results[t]['buy'] += 1
-            day_rows = df[df['时间'].str.startswith(buy_date)]
-            if len(day_rows) == 0:
+            # 窗口：触发后下一根K线开始
+            window_rows = df[(df['时间'].str.startswith(buy_date)) & (df.index > buy_bar)]
+            if len(window_rows) == 0:
                 continue
-            day_15 = day_rows[day_rows['时间'].apply(
+            day_15 = window_rows[window_rows['时间'].apply(
                 lambda x: int(str(x)[11:13]) < 15 or (int(str(x)[11:13]) == 15 and int(str(x)[14:16]) == 0)
             )]
             if len(day_15) == 0:
@@ -128,7 +130,7 @@ def run_test_for_targets(csv_file='平安1-5月_回测数据_2026.csv', speed=10
             if max_spread >= t:
                 zhengt_results[t]['success'] += 1
 
-    # 倒T：最大价差 = 卖出价 - 当天15:00前最低价
+    # 倒T：最大价差 = 卖出价 - 触发后最低价
     for signal in daot_signals:
         sell_bar = signal['bar']
         sell_price = signal['price']
@@ -137,10 +139,11 @@ def run_test_for_targets(csv_file='平安1-5月_回测数据_2026.csv', speed=10
 
         for t in DAOT_TARGETS:
             daot_results[t]['sell'] += 1
-            day_rows = df[df['时间'].str.startswith(sell_date)]
-            if len(day_rows) == 0:
+            # 窗口：触发后下一根K线开始
+            window_rows = df[(df['时间'].str.startswith(sell_date)) & (df.index > sell_bar)]
+            if len(window_rows) == 0:
                 continue
-            day_15 = day_rows[day_rows['时间'].apply(
+            day_15 = window_rows[window_rows['时间'].apply(
                 lambda x: int(str(x)[11:13]) < 15 or (int(str(x)[11:13]) == 15 and int(str(x)[14:16]) == 0)
             )]
             if len(day_15) == 0:
@@ -150,7 +153,47 @@ def run_test_for_targets(csv_file='平安1-5月_回测数据_2026.csv', speed=10
             if max_spread >= t:
                 daot_results[t]['success'] += 1
 
+    # ===== 正T逐笔明细 =====
+    print('=' * 90)
+    print('正T逐笔明细（19次买入信号）')
+    print('=' * 90)
+    print(f"{'#':>3s} {'日期':10s} {'买入时间':8s} {'买入价':8s} {'最高价':8s} {'最高价时间':8s} {'最大价差':8s}")
+    print('-' * 90)
+
+    zhengt_details = []
+    for signal in zhengt_signals:
+        buy_date = signal['time'][:10]
+        buy_time = signal['time'][11:19]
+        buy_price = signal['price']
+        buy_bar = signal['bar']
+        # 窗口：触发后下一根K线开始
+        window_rows = df[(df['时间'].str.startswith(buy_date)) & (df.index > buy_bar)]
+        day_15 = window_rows[window_rows['时间'].apply(
+            lambda x: int(str(x)[11:13]) < 15 or (int(str(x)[11:13]) == 15 and int(str(x)[14:16]) == 0)
+        )]
+        if len(day_15) > 0:
+            max_price = day_15['最高'].max()
+            max_spread = max_price - buy_price
+            max_row = day_15[day_15['最高'] == max_price]
+            max_time = str(max_row.iloc[-1]['时间'])[11:19] if len(max_row) > 0 else 'N/A'
+        else:
+            max_price = buy_price
+            max_spread = 0
+            max_time = 'N/A'
+        zhengt_details.append({
+            'buy_date': buy_date,
+            'buy_time': buy_time,
+            'buy_price': buy_price,
+            'max_price': max_price,
+            'max_time': max_time,
+            'max_spread': max_spread,
+        })
+
+    for i, d in enumerate(zhengt_details, 1):
+        print(f"{i:>3d} {d['buy_date']} {d['buy_time']} {d['buy_price']:8.2f} {d['max_price']:8.2f} {d['max_time']} {d['max_spread']:8.2f}")
+
     # ===== 输出结果 =====
+    print()
     print('=' * 70)
     print('v16.5 回测结果（94个交易日，当天15:00收盘评估，最大价差）')
     print('=' * 70)

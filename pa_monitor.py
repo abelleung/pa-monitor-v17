@@ -1290,9 +1290,10 @@ class PAMonitor:
         if not self.sell_active:
             return
 
-        # v16.1.2 FIX: 更新当天窗口内最低价追踪
-        if self.sell_window_min_price is None or current_price < self.sell_window_min_price:
-            self.sell_window_min_price = current_price
+        # v16.5 FIX: 仅从触发后下一根K线开始追踪窗口内最低价
+        if total_bars is not None and total_bars - 1 > self.sell_signal_bar:
+            if self.sell_window_min_price is None or current_price < self.sell_window_min_price:
+                self.sell_window_min_price = current_price
 
         # 到达目标买回价（推送提醒，不影响状态）
         if not self.buyback_notified and current_price <= self.target_buy_price:
@@ -1337,21 +1338,37 @@ class PAMonitor:
                 minute = int(t_str[14:16])
                 if hour > 15 or (hour == 15 and minute >= 0):
                     self.sell_eval_notified = True
-                    window_min = self.sell_window_min_price if self.sell_window_min_price is not None else current_price
+                    window_min = self.sell_window_min_price if self.sell_window_min_price is not None else self.sell_price
                     # 用动态目标差价评估（与卖出时一致）
                     eval_target = STRATEGY_CONFIG['TARGET_DIFF_NORMAL']  # 默认
+                    if self.sell_time:
+                        sell_date = str(self.sell_time)[:10]
+                        est = estimate_daily_amount_and_amplitude(
+                            self.tdx.get_latest_bars(count=600) if not self.simulate else self.simulate_df[
+                                self.simulate_df['时间'].str.startswith(sell_date)
+                            ],
+                            self.daily_stats.get('prev_close', 0),
+                            self.daily_stats.get('open_price') or 0
+                        )
+                        if est:
+                            if est['is_extreme_low']:
+                                eval_target = STRATEGY_CONFIG['EXTREME_LOW_TARGET']
+                            elif est['is_volume_low']:
+                                eval_target = STRATEGY_CONFIG['TARGET_DIFF_LOW_VOLUME']
+                            else:
+                                eval_target = STRATEGY_CONFIG['TARGET_DIFF_NORMAL']
                     if window_min <= self.sell_price - eval_target:
                         result = "✅ 成功"
-                        self.logger.info(f"倒T收盘评估：成功（窗口最低{window_min:.2f} <= {self.sell_price - eval_target:.2f}）")
+                        self.logger.info(f"倒T收盘评估：成功（触发后最低{window_min:.2f} <= {self.sell_price - eval_target:.2f}）")
                     else:
                         result = "❌ 失败"
-                        self.logger.info(f"倒T收盘评估：失败（窗口最低{window_min:.2f} > {self.sell_price - eval_target:.2f}）")
+                        self.logger.info(f"倒T收盘评估：失败（触发后最低{window_min:.2f} > {self.sell_price - eval_target:.2f}）")
                     msg = (
                         f"📋 倒T 收盘评估（15:00）\n\n"
                         f"卖出价：{self.sell_price}元（{self.sell_time}）\n"
-                        f"窗口最低：{window_min:.2f}元\n\n"
+                        f"触发后最低：{window_min:.2f}元\n\n"
                         f"评估结果：{result}\n"
-                        f"（评估标准：当天最低 <= 卖出价-{eval_target}）"
+                        f"（评估标准：触发后最低 <= 卖出价-{eval_target}）"
                     )
                     notify(f"📋 倒T收盘评估 — {result}", msg, level="info")
             return
@@ -1361,9 +1378,10 @@ class PAMonitor:
         说明：评估在当天15:00收盘时进行，不跨天，不用90分钟窗口
               唯一制约下次正T触发的是 last_zhengt_signal_bar（30分钟冷静期）
         """
-        # v16.1.2 FIX: 更新当天窗口内最高价追踪
-        if self.zhengt_window_max_price is None or current_price > self.zhengt_window_max_price:
-            self.zhengt_window_max_price = current_price
+        # v16.5 FIX: 仅从触发后下一根K线开始追踪窗口内最高价
+        if total_bars is not None and total_bars - 1 > self.zhengt_signal_bar:
+            if self.zhengt_window_max_price is None or current_price > self.zhengt_window_max_price:
+                self.zhengt_window_max_price = current_price
 
         # 到达目标卖出价（推送提醒，不影响状态）
         if not self.zhengt_sell_notified and current_price >= self.zhengt_target_sell_price:
@@ -1400,15 +1418,15 @@ class PAMonitor:
             self.logger.info(f"⚠️ 正T风险提示：当前价{current_price} < 止损{self.zhengt_stop_loss_price}，继续追踪至15:00")
             return
 
-        # 当天15:00收盘评估（用最大价差判断，不影响任何状态）
+        # 当天15:00收盘评估（用触发后最大价差判断，不影响任何状态）
         if not self.zhengt_eval_notified and current_time:
             t_str = str(current_time)
             if len(t_str) >= 13:
                 hour = int(t_str[11:13])
                 if hour > 15 or (hour == 15 and int(t_str[14:16]) >= 0):
                     self.zhengt_eval_notified = True
-                    window_max = self.zhengt_window_max_price if self.zhengt_window_max_price is not None else current_price
-                    max_spread = window_max - self.zhengt_buy_price  # 正T最大价差 = 最高 - 买入价
+                    window_max = self.zhengt_window_max_price if self.zhengt_window_max_price is not None else self.zhengt_buy_price
+                    max_spread = window_max - self.zhengt_buy_price  # 正T最大价差 = 触发后最高 - 买入价
                     target = STRATEGY_CONFIG['ZHENGT_TARGET_DIFF']
                     if max_spread >= target:
                         result = "✅ 成功"
@@ -1419,10 +1437,10 @@ class PAMonitor:
                     msg = (
                         f"📋 正T 收盘评估（15:00）\n\n"
                         f"买入价：{self.zhengt_buy_price}元（{self.zhengt_buy_time}）\n"
-                        f"窗口最高：{window_max:.2f}元\n\n"
+                        f"触发后最高：{window_max:.2f}元\n\n"
                         f"最大价差：{max_spread:.2f}元\n\n"
                         f"评估结果：{result}\n"
-                        f"（评估标准：当天最高 - 买入价 >= {target}）"
+                        f"（评估标准：触发后最高 - 买入价 >= {target}）"
                     )
                     notify(f"📋 正T收盘评估 — {result}", msg, level="info")
             return
@@ -2130,7 +2148,7 @@ class PAMonitor:
                     self.sell_active = True
                     sell_price = details.get('价格', 0)
                     self.sell_price = sell_price
-                    self.sell_window_min_price = sell_price  # v16.1.2 FIX: 初始化窗口最低价追踪
+                    self.sell_window_min_price = None  # v16.5: 窗口从下一根K线开始追踪
                     self.sell_time = details.get('时间', '')
                     self.buyback_notified = False
                     self.sell_stop_loss_triggered = False  # v15.3: 重置止损触发标志
@@ -2274,7 +2292,7 @@ class PAMonitor:
                     self.zhengt_buy_active = True
                     zhengt_price = zhengt_details.get('价格', 0)
                     self.zhengt_buy_price = zhengt_price
-                    self.zhengt_window_max_price = zhengt_price  # v16.1.2 FIX: 初始化窗口最高价追踪
+                    self.zhengt_window_max_price = None  # v16.5: 窗口从下一根K线开始追踪
                     self.zhengt_buy_time = zhengt_details.get('时间', '')
                     # v15.1: 正T使用专用目标差价（0.20元），不再与倒T共用
                     self.zhengt_target_sell_price = round(zhengt_price + STRATEGY_CONFIG['ZHENGT_TARGET_DIFF'], 2)
