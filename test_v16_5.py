@@ -1,5 +1,5 @@
 """
-v16.5 四种策略测试脚本（含90分钟窗口评估）
+v16.5 四种策略测试脚本（当天15:00收盘评估，遍历多种目标差价）
 必须与实际代码（strategies.py + pa_monitor.py）保持一致
 """
 import sys
@@ -9,194 +9,174 @@ from pa_monitor import PAMonitor
 from indicators import STRATEGY_CONFIG
 import time
 
-def run_full_test(csv_file='平安1-5月_回测数据_2026.csv', speed=10000):
+# 正T目标差价列表
+ZHENGT_TARGETS = [0.20, 0.30, 0.40, 0.50]
+# 倒T目标差价列表
+DAOT_TARGETS = [0.25, 0.30, 0.35, 0.40]
+
+
+def run_test_for_targets(csv_file='平安1-5月_回测数据_2026.csv', speed=10000):
+    """对每种正T/倒T目标差价跑一遍回测，用15:00最大价差评估"""
+
+    from strategies import check_momentum_sell_signal, check_boll_sell_signal, check_pullback_sell_signal
+
+    # 结果存储
+    zhengt_results = {t: {'buy': 0, 'success': 0} for t in ZHENGT_TARGETS}
+    daot_results = {t: {'sell': 0, 'success': 0} for t in DAOT_TARGETS}
+
+    # 先找出所有正T买入信号和倒T卖出信号（与目标差价无关）
     monitor = PAMonitor(simulate=True, simulate_csv=csv_file, simulate_speed=speed)
+    df = monitor.simulate_df
 
-    monitor.running = True
-    monitor._reset_daily_stats()
-    monitor.signal_count_today = 0
-    monitor.sell_active = False
-    monitor.last_signal_bar = -31
-    monitor.buyback_notified = False
-    monitor.sell_stop_loss_triggered = False
-    monitor.sell_signal_bar = 0
-    monitor.sell_eval_notified = False
-    monitor.zhengt_signal_count_today = 0
-    monitor.zhengt_buy_active = False
-    monitor.zhengt_sell_notified = False
-    monitor.last_zhengt_signal_bar = -31
-    monitor.zhengt_stop_loss_triggered = False
-    monitor.zhengt_signal_bar = 0
-    monitor.zhengt_eval_notified = False
+    zhengt_signals = []  # (bar_index, buy_price, buy_time)
+    daot_signals = []    # (bar_index, sell_price, sell_time)
 
-    print('=' * 60)
-    print('v16.5 四种策略完整测试（含90分钟窗口评估）')
-    print('=' * 60)
-
-    counts = {
-        '动量策略': 0,
-        'BOLL补充': 0,
-        '冲高回落': 0,
-        '正T买入': 0,
-        '正T卖出': 0,
-    }
-    examples = {
-        '动量策略': [],
-        'BOLL补充': [],
-        '冲高回落': [],
-        '正T买入': [],
-        '正T卖出': [],
-    }
+    monitor2 = PAMonitor(simulate=True, simulate_csv=csv_file, simulate_speed=speed)
+    monitor2.running = True
+    monitor2._reset_daily_stats()
+    monitor2.signal_count_today = 0
+    monitor2.last_signal_bar = -31
+    monitor2.zhengt_signal_count_today = 0
+    monitor2.last_zhengt_signal_bar = -31
 
     for i in range(20141):
-        df = monitor._get_simulated_bars(count=600)
-        if df is None:
+        df2 = monitor2._get_simulated_bars(count=600)
+        if df2 is None:
             break
 
-        completed = df.iloc[-1]
-        total_bars = len(df)
+        completed = df2.iloc[-1]
+        total_bars = len(df2)
         latest_time = str(completed['时间'])
 
         if total_bars < 5:
             continue
 
-        # 更新 daily_stats（模拟 run() 主循环）
+        # 更新 daily_stats
         current_high = float(completed['最高'])
         current_low = float(completed['最低'])
-        if monitor.daily_stats['high_price'] is None:
-            monitor.daily_stats['high_price'] = current_high
-            monitor.daily_stats['low_price'] = current_low
+        if monitor2.daily_stats['high_price'] is None:
+            monitor2.daily_stats['high_price'] = current_high
+            monitor2.daily_stats['low_price'] = current_low
         else:
-            monitor.daily_stats['high_price'] = max(monitor.daily_stats['high_price'], current_high)
-            monitor.daily_stats['low_price'] = min(monitor.daily_stats['low_price'], current_low)
+            monitor2.daily_stats['high_price'] = max(monitor2.daily_stats['high_price'], current_high)
+            monitor2.daily_stats['low_price'] = min(monitor2.daily_stats['low_price'], current_low)
 
         # ===== 倒T信号检查 =====
-        in_cooldown = (total_bars - 1 - monitor.last_signal_bar) < STRATEGY_CONFIG['COOLDOWN_BARS']
-
+        in_cooldown = (total_bars - 1 - monitor2.last_signal_bar) < STRATEGY_CONFIG['COOLDOWN_BARS']
         if not in_cooldown:
-            # 暴跌保护：日内跌幅>2.0%跳过倒T
-            prev_close = monitor.daily_stats.get('prev_close', 0)
+            prev_close = monitor2.daily_stats.get('prev_close', 0)
             if prev_close > 0 and completed['收盘'] < prev_close:
                 day_drop_pct = (prev_close - completed['收盘']) / prev_close * 100
                 if day_drop_pct > STRATEGY_CONFIG['CRASH_DAY_DROP_MAX']:
-                    monitor.logger.info(f"⚠️ 暴跌保护：日内跌幅{day_drop_pct:.2f}% > {STRATEGY_CONFIG['CRASH_DAY_DROP_MAX']}%，跳过倒T信号")
-                    in_cooldown = True  # 跳过本次
+                    in_cooldown = True
 
             if not in_cooldown:
-                from strategies import check_momentum_sell_signal, check_boll_sell_signal, check_pullback_sell_signal
-
-                # 策略1: 动量
-                momentum_triggered, momentum_details = check_momentum_sell_signal(completed, monitor.logger)
-
-                # 策略2: BOLL（动量未触发时检查）
+                momentum_triggered, _ = check_momentum_sell_signal(completed, monitor2.logger)
                 boll_triggered = False
-                boll_details = None
-                if not momentum_triggered and not monitor.sell_active:
-                    boll_triggered, boll_details = check_boll_sell_signal(
-                        completed, monitor.logger, day_high=monitor.daily_stats.get('high_price', 0))
-
-                # 策略3: 冲高回落（前两个都未触发时检查）
+                if not momentum_triggered:
+                    boll_triggered, _ = check_boll_sell_signal(
+                        completed, monitor2.logger, day_high=monitor2.daily_stats.get('high_price', 0))
                 current_bandwidth = float(completed['BOLL带宽'])
                 is_low_volatility = current_bandwidth < STRATEGY_CONFIG['PULLBACK_BANDWIDTH_THRESH']
-
                 pullback_triggered = False
-                pullback_details = None
-                if not momentum_triggered and not boll_triggered and is_low_volatility and not monitor.sell_active:
-                    pullback_triggered, pullback_details = check_pullback_sell_signal(
-                        df, total_bars - 2, monitor.logger, day_high=monitor.daily_stats['high_price'])
+                if not momentum_triggered and not boll_triggered and is_low_volatility:
+                    pullback_triggered, _ = check_pullback_sell_signal(
+                        df2, total_bars - 2, monitor2.logger, day_high=monitor2.daily_stats['high_price'])
 
-                # 确定触发策略
                 triggered = momentum_triggered or boll_triggered or pullback_triggered
                 if triggered:
-                    if momentum_triggered:
-                        strategy = '动量策略'
-                        details = momentum_details
-                    elif boll_triggered:
-                        strategy = 'BOLL补充'
-                        details = boll_details
-                    else:
-                        strategy = '冲高回落'
-                        details = pullback_details
-
-                    counts[strategy] += 1
-                    if len(examples[strategy]) < 3:
-                        examples[strategy].append(f"{latest_time} 收盘={completed['收盘']:.2f}")
-                    monitor.sell_active = True
-                    monitor.sell_price = completed['收盘']
-                    monitor.sell_signal_bar = total_bars - 1
-                    monitor.signal_count_today += 1
-                    monitor.target_buy_price = completed['收盘'] - STRATEGY_CONFIG['TARGET_DIFF']
-                    monitor.stop_loss_price = completed['收盘'] + STRATEGY_CONFIG['STOP_LOSS_DIFF']
+                    daot_signals.append({
+                        'bar': total_bars - 1,
+                        'price': completed['收盘'],
+                        'time': latest_time,
+                    })
+                    monitor2.last_signal_bar = total_bars - 1
 
         # ===== 正T买入检查 =====
-        # 说明：仅用 last_zhengt_signal_bar 控制30分钟冷静期，不用 zhengt_buy_active 阻挡
-        zhengt_triggered, zhengt_details = monitor._check_zhengt_signals(df, completed, total_bars)
+        zhengt_triggered, _ = monitor2._check_zhengt_signals(df2, completed, total_bars)
         if zhengt_triggered:
-            counts['正T买入'] += 1
-            if len(examples['正T买入']) < 3:
-                examples['正T买入'].append(f"{latest_time} 收盘={completed['收盘']:.2f}")
-            # 设置追踪状态（但不在意 zhengt_buy_active 阻挡下次触发）
-            monitor.zhengt_buy_price = completed['收盘']
-            monitor.zhengt_buy_time = latest_time
-            monitor.zhengt_signal_count_today += 1
-            monitor.zhengt_target_sell_price = round(completed['收盘'] + STRATEGY_CONFIG['ZHENGT_TARGET_DIFF'], 2)
-            monitor.zhengt_stop_loss_price = round(completed['收盘'] - STRATEGY_CONFIG['ZHENGT_STOP_LOSS_DIFF'], 2)
-            monitor.zhengt_window_max_price = completed['收盘']
-            monitor.zhengt_sell_notified = False
-            monitor.zhengt_stop_loss_triggered = False
-            monitor.zhengt_signal_bar = total_bars - 1
-            monitor.zhengt_eval_notified = False
-
-        # 正T卖出追踪 + 当天15:00收盘评估（与 pa_monitor.py 一致）
-        # 说明：15:00收盘评估，不跨天；30分钟冷却期自然过期
-        current_price = completed['收盘']
-        # 更新窗口内最高价
-        if monitor.zhengt_signal_bar > 0:
-            if monitor.zhengt_window_max_price is None or current_price > monitor.zhengt_window_max_price:
-                monitor.zhengt_window_max_price = current_price
-
-        # 到达目标卖出价（推送提醒，不影响状态）
-        if not monitor.zhengt_sell_notified and monitor.zhengt_target_sell_price > 0 and current_price >= monitor.zhengt_target_sell_price:
-            counts['正T卖出'] += 1
-            monitor.zhengt_sell_notified = True
-            if len(examples['正T卖出']) < 3:
-                examples['正T卖出'].append(f"{latest_time} 卖出={current_price:.2f}")
-
-        # 止损触发（推送提醒，不影响状态）
-        if not monitor.zhengt_stop_loss_triggered and monitor.zhengt_stop_loss_price > 0 and current_price < monitor.zhengt_stop_loss_price:
-            monitor.zhengt_stop_loss_triggered = True
-            monitor.logger.info(f"正T止损触发：当前价{current_price} < 止损{monitor.zhengt_stop_loss_price}，继续追踪至15:00")
-
-        # 当天15:00收盘评估（用最大价差判断，不影响任何状态）
-        if not monitor.zhengt_eval_notified and monitor.zhengt_signal_bar > 0:
-            t_str = str(latest_time)
-            if len(t_str) >= 13:
-                hour = int(t_str[11:13])
-                if hour > 15 or (hour == 15 and int(t_str[14:16]) >= 0):
-                    monitor.zhengt_eval_notified = True
-                    window_max = monitor.zhengt_window_max_price if monitor.zhengt_window_max_price is not None else current_price
-                    max_spread = window_max - monitor.zhengt_buy_price  # 正T最大价差 = 最高 - 买入价
-                    if max_spread >= STRATEGY_CONFIG['ZHENGT_TARGET_DIFF']:
-                        monitor.logger.info(f"正T收盘评估(15:00)：成功（最大价差{max_spread:.2f} >= {STRATEGY_CONFIG['ZHENGT_TARGET_DIFF']}）")
-                    else:
-                        monitor.logger.info(f"正T收盘评估(15:00)：失败（最大价差{max_spread:.2f} < {STRATEGY_CONFIG['ZHENGT_TARGET_DIFF']}）")
+            zhengt_signals.append({
+                'bar': total_bars - 1,
+                'price': completed['收盘'],
+                'time': latest_time,
+            })
+            monitor2.last_zhengt_signal_bar = total_bars - 1
 
         time.sleep(0.001)
 
+    # ===== 对每种目标差价，计算15:00最大价差胜率 =====
+
+    # 正T：最大价差 = 当天15:00前最高价 - 买入价
+    for signal in zhengt_signals:
+        buy_bar = signal['bar']
+        buy_price = signal['price']
+        buy_time = signal['time']
+        buy_date = buy_time[:10]
+
+        for t in ZHENGT_TARGETS:
+            zhengt_results[t]['buy'] += 1
+            day_rows = df[df['时间'].str.startswith(buy_date)]
+            if len(day_rows) == 0:
+                continue
+            day_15 = day_rows[day_rows['时间'].apply(
+                lambda x: int(str(x)[11:13]) < 15 or (int(str(x)[11:13]) == 15 and int(str(x)[14:16]) == 0)
+            )]
+            if len(day_15) == 0:
+                continue
+            max_price = day_15['最高'].max()
+            max_spread = max_price - buy_price
+            if max_spread >= t:
+                zhengt_results[t]['success'] += 1
+
+    # 倒T：最大价差 = 卖出价 - 当天15:00前最低价
+    for signal in daot_signals:
+        sell_bar = signal['bar']
+        sell_price = signal['price']
+        sell_time = signal['time']
+        sell_date = sell_time[:10]
+
+        for t in DAOT_TARGETS:
+            daot_results[t]['sell'] += 1
+            day_rows = df[df['时间'].str.startswith(sell_date)]
+            if len(day_rows) == 0:
+                continue
+            day_15 = day_rows[day_rows['时间'].apply(
+                lambda x: int(str(x)[11:13]) < 15 or (int(str(x)[11:13]) == 15 and int(str(x)[14:16]) == 0)
+            )]
+            if len(day_15) == 0:
+                continue
+            min_price = day_15['最低'].min()
+            max_spread = sell_price - min_price
+            if max_spread >= t:
+                daot_results[t]['success'] += 1
+
+    # ===== 输出结果 =====
+    print('=' * 70)
+    print('v16.5 回测结果（94个交易日，当天15:00收盘评估，最大价差）')
+    print('=' * 70)
+
     print()
-    print('=' * 60)
-    print('v16.5 测试结果（94个交易日，含90分钟窗口评估）:')
-    print('=' * 60)
-    for strategy, count in counts.items():
-        print(f'{strategy}: {count} 次')
-        for ex in examples[strategy]:
-            print(f'  - {ex}')
-        if count > 3 and len(examples[strategy]) >= 3:
-            print(f'  ... (共{count}次)')
-    print('=' * 60)
-    print(f'倒T合计: {counts["动量策略"] + counts["BOLL补充"] + counts["冲高回落"]} 次')
-    print(f'正T合计: {counts["正T买入"]} 次买入, {counts["正T卖出"]} 次卖出')
-    print('=' * 60)
+    print('【正T策略】买入次数 & 最大价差胜率')
+    print(f"{'目标差价':12s} {'买入次数':10s} {'成功次数':10s} {'胜率':10s}")
+    print('-' * 70)
+    for t in ZHENGT_TARGETS:
+        r = zhengt_results[t]
+        win_rate = r['success'] / r['buy'] * 100 if r['buy'] > 0 else 0
+        print(f"{t:12.2f} {r['buy']:10d} {r['success']:10d} {win_rate:9.1f}%")
+    print(f"正T总触发次数: {len(zhengt_signals)}")
+
+    print()
+    print('【倒T策略】卖出次数 & 最大价差胜率')
+    print(f"{'目标差价':12s} {'卖出次数':10s} {'成功次数':10s} {'胜率':10s}")
+    print('-' * 70)
+    for t in DAOT_TARGETS:
+        r = daot_results[t]
+        win_rate = r['success'] / r['sell'] * 100 if r['sell'] > 0 else 0
+        print(f"{t:12.2f} {r['sell']:10d} {r['success']:10d} {win_rate:9.1f}%")
+    print(f"倒T总触发次数: {len(daot_signals)}")
+
+    print('=' * 70)
+
 
 if __name__ == '__main__':
-    run_full_test()
+    run_test_for_targets()
