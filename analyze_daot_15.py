@@ -1,8 +1,5 @@
 """
-v16.5 倒T不同价差理论胜率测试（15:00收盘评估）
-测试四种目标差价：0.25, 0.30, 0.35, 0.40元
-统计当天15:00收盘价是否 <= 卖出价-目标差价（理论胜率）
-说明：评估在当天15:00收盘时进行，不跨天
+查看倒T卖出后当天走势（15:00收盘评估）
 """
 import sys
 sys.path.insert(0, '.')
@@ -11,17 +8,14 @@ from pa_monitor import PAMonitor, estimate_daily_amount_and_amplitude
 from indicators import STRATEGY_CONFIG
 from strategies import check_momentum_sell_signal, check_boll_sell_signal, check_pullback_sell_signal
 
-def test_daot_theoretical(csv_file='平安1-5月_回测数据_2026.csv', speed=10000):
-    monitor = PAMonitor(simulate=True, simulate_csv=csv_file, simulate_speed=speed)
+def analyze_daot_movement(csv_file='平安1-5月_回测数据_2026.csv'):
+    monitor = PAMonitor(simulate=True, simulate_csv=csv_file, simulate_speed=10000)
     df = monitor.simulate_df
 
-    targets = [0.25, 0.30, 0.35, 0.40]
-    results = {t: {'sell': 0, 'success': 0} for t in targets}
+    sell_signals = []
 
-    sell_signals = []  # 记录每次卖出：(bar_index, sell_price, target)
-
-    # 第一遍：找出所有倒T卖出信号
-    monitor2 = PAMonitor(simulate=True, simulate_csv=csv_file, simulate_speed=speed)
+    # 找出所有倒T卖出信号
+    monitor2 = PAMonitor(simulate=True, simulate_csv=csv_file, simulate_speed=10000)
     monitor2.running = True
     monitor2._reset_daily_stats()
     monitor2.last_signal_bar = -STRATEGY_CONFIG['COOLDOWN_BARS'] - 1
@@ -85,39 +79,46 @@ def test_daot_theoretical(csv_file='平安1-5月_回测数据_2026.csv', speed=1
                     sell_signals.append({
                         'bar': total_bars - 1,
                         'price': completed['收盘'],
-                        'target': current_target,
                         'time': str(completed['时间']),
+                        'target': current_target,
                     })
                     monitor2.last_signal_bar = total_bars - 1
 
-    # 第二遍：对每次卖出，检查当天15:00收盘价
-    for signal in sell_signals:
-        sell_price = signal['price']
-        sell_time = signal['time']
-        sell_date = sell_time[:10]
-
-        for t in targets:
-            results[t]['sell'] += 1
-            # 用当天15:00收盘价评估（不跨天）
-            day_rows = df[df['时间'].str.startswith(sell_date)]
-            if len(day_rows) == 0:
-                continue
-            # 15:00的价格（取最后一根K线）
-            close_15 = day_rows.iloc[-1]['收盘']
-            if close_15 <= sell_price - t:
-                results[t]['success'] += 1
-
+    # 分析卖出后的走势
     print('=' * 70)
-    print('倒T不同价差理论胜率测试（94个交易日，当天15:00收盘价）')
+    print('倒T卖出后当天走势分析（94个交易日）')
     print('=' * 70)
     print()
-    print(f"{'目标差价':12s} {'卖出次数':10s} {'理论成功':10s} {'胜率':10s}")
+    print(f"{'时间':20s} {'卖出价':8s} {'目标买回':8s} {'15:00价':8s} {'差值':8s} {'是否成功':10s}")
     print('-' * 70)
-    for t in targets:
-        r = results[t]
-        win_rate = r['success'] / r['sell'] * 100 if r['sell'] > 0 else 0
-        print(f"{t:12.2f} {r['sell']:10d} {r['success']:10d} {win_rate:9.1f}%")
+
+    success_count = 0
+    for signal in sell_signals[:20]:  # 只看前20个
+        sell_bar = signal['bar']
+        sell_price = signal['price']
+        sell_time = signal['time']
+        target = signal['target']
+        target_buy = sell_price - target
+
+        # 找到当天15:00的收盘价
+        signal_date = sell_time[:10]
+        day_rows = df[df['时间'].str.startswith(signal_date)]
+        if len(day_rows) == 0:
+            continue
+
+        # 15:00的价格（取最后一根K线）
+        close_15 = day_rows.iloc[-1]['收盘']
+
+        # 判断成功：15:00价格 <= 目标买回价
+        success = close_15 <= target_buy
+        if success:
+            success_count += 1
+
+        print(f"{sell_time:20s} {sell_price:8.2f} {target_buy:8.2f} {close_15:8.2f} {close_15 - target_buy:8.2f} {'是' if success else '否':10s}")
+
+    print('-' * 70)
+    print(f"前20次：成功{success_count}次，胜率{success_count/20*100:.1f}%")
     print('=' * 70)
 
 if __name__ == '__main__':
-    test_daot_theoretical()
+    analyze_daot_movement()

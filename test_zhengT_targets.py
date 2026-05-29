@@ -63,8 +63,8 @@ def test_zhengT_with_target(csv_file='平安1-5月_回测数据_2026.csv', speed
             monitor.zhengt_signal_bar = total_bars - 1
             monitor.zhengt_eval_notified = False
 
-        # 正T卖出追踪 + 90分钟窗口评估（与 pa_monitor.py 一致）
-        # 说明：90分钟仅评估推送，不影响任何状态；30分钟冷却期自然过期
+        # 正T卖出追踪 + 当天15:00收盘评估（与 pa_monitor.py 一致）
+        # 说明：15:00收盘评估，不跨天；30分钟冷却期自然过期
         current_price = completed['收盘']
         # 更新窗口内最高价
         if monitor.zhengt_signal_bar > 0:
@@ -82,16 +82,19 @@ def test_zhengT_with_target(csv_file='平安1-5月_回测数据_2026.csv', speed
         if not monitor.zhengt_stop_loss_triggered and monitor.zhengt_stop_loss_price > 0 and current_price < monitor.zhengt_stop_loss_price:
             monitor.zhengt_stop_loss_triggered = True
 
-        # 90分钟窗口评估（仅推送结果，不影响任何状态）
-        if monitor.zhengt_stop_loss_triggered and not monitor.zhengt_eval_notified and monitor.zhengt_signal_bar > 0:
-            elapsed = total_bars - monitor.zhengt_signal_bar
-            if elapsed >= STRATEGY_CONFIG['EVAL_WINDOW_BARS']:
-                monitor.zhengt_eval_notified = True
-                window_max = monitor.zhengt_window_max_price if monitor.zhengt_window_max_price is not None else current_price
-                if window_max >= monitor.zhengt_buy_price + 0.20:
-                    monitor.logger.info(f"正T90分钟窗口评估：成功（窗口最高{window_max:.2f} >= {monitor.zhengt_buy_price + 0.20:.2f}）")
-                else:
-                    monitor.logger.info(f"正T90分钟窗口评估：失败（窗口最高{window_max:.2f} < {monitor.zhengt_buy_price + 0.20:.2f}）")
+        # 当天15:00收盘评估（仅推送结果，不影响任何状态）
+        if not monitor.zhengt_eval_notified and monitor.zhengt_signal_bar > 0:
+            t_str = str(latest_time)
+            if len(t_str) >= 13:
+                hour = int(t_str[11:13])
+                minute = int(t_str[14:16])
+                if hour > 15 or (hour == 15 and minute >= 0):
+                    monitor.zhengt_eval_notified = True
+                    window_max = monitor.zhengt_window_max_price if monitor.zhengt_window_max_price is not None else current_price
+                    if window_max >= monitor.zhengt_buy_price + target_diff:
+                        monitor.logger.info(f"正T收盘评估(15:00)：成功（窗口最高{window_max:.2f} >= {monitor.zhengt_buy_price + target_diff:.2f}）")
+                    else:
+                        monitor.logger.info(f"正T收盘评估(15:00)：失败（窗口最高{window_max:.2f} < {monitor.zhengt_buy_price + target_diff:.2f}）")
 
         time.sleep(0.001)
 

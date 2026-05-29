@@ -108,7 +108,7 @@ def test_daot_with_target(csv_file='平安1-5月_回测数据_2026.csv', speed=1
                     monitor.sell_stop_loss_triggered = False
                     monitor.window_min_price = completed['收盘']
 
-        # 倒T回买追踪 + 90分钟窗口评估
+        # 倒T回买追踪 + 当天15:00收盘评估
         current_price = completed['收盘']
         # 更新窗口内最低价
         if monitor.sell_signal_bar > 0:
@@ -126,18 +126,20 @@ def test_daot_with_target(csv_file='平安1-5月_回测数据_2026.csv', speed=1
         if not monitor.sell_stop_loss_triggered and monitor.stop_loss_price > 0 and current_price > monitor.stop_loss_price:
             monitor.sell_stop_loss_triggered = True
 
-        # 90分钟窗口评估（记录结果，不影响任何状态）
-        if monitor.sell_stop_loss_triggered and not monitor.sell_eval_notified and monitor.sell_signal_bar > 0:
-            elapsed = total_bars - monitor.sell_signal_bar
-            if elapsed >= STRATEGY_CONFIG['EVAL_WINDOW_BARS']:
-                monitor.sell_eval_notified = True
-                window_min = monitor.window_min_price if monitor.window_min_price is not None else current_price
-                # 理论成功：窗口最低价 <= 卖出价 - 目标差价
-                theoretical_success = window_min <= monitor.sell_price - current_target
-                if theoretical_success:
-                    monitor.logger.info(f"倒T90分钟窗口评估：成功（窗口最低{window_min:.2f} <= {monitor.sell_price - current_target:.2f}）")
-                else:
-                    monitor.logger.info(f"倒T90分钟窗口评估：失败（窗口最低{window_min:.2f} > {monitor.sell_price - current_target:.2f}）")
+        # 当天15:00收盘评估（记录结果，不影响任何状态）
+        if not monitor.sell_eval_notified and monitor.sell_signal_bar > 0:
+            t_str = latest_time
+            if len(t_str) >= 13:
+                hour = int(t_str[11:13])
+                minute = int(t_str[14:16])
+                if hour > 15 or (hour == 15 and minute >= 0):
+                    monitor.sell_eval_notified = True
+                    window_min = monitor.window_min_price if monitor.window_min_price is not None else current_price
+                    # 理论成功：当天最低价 <= 卖出价 - 目标差价
+                    if window_min <= monitor.sell_price - current_target:
+                        monitor.logger.info(f"倒T收盘评估(15:00)：成功（窗口最低{window_min:.2f} <= {monitor.sell_price - current_target:.2f}）")
+                    else:
+                        monitor.logger.info(f"倒T收盘评估(15:00)：失败（窗口最低{window_min:.2f} > {monitor.sell_price - current_target:.2f}）")
 
         time.sleep(0.001)
 

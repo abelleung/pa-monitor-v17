@@ -1201,7 +1201,7 @@ class PAMonitor:
                             signal_bar, eval_notified_attr, active_attr, window_price_attr,
                             success_profit_calc):
         """
-        90分钟窗口评估公共方法（倒T和正T共用）
+        当天15:00收盘评估（不跨天，不用90分钟窗口）
         - signal_type: '倒T' or '正T'
         - window_price: 窗口内极值（倒T用最低价，正T用最高价）
         - threshold: 成功阈值
@@ -1223,9 +1223,15 @@ class PAMonitor:
         if total_bars is None:
             return False
 
-        elapsed_bars = total_bars - signal_bar
-        if elapsed_bars < STRATEGY_CONFIG['EVAL_WINDOW_BARS']:
-            return False
+        # 改为：当天15:00收盘时评估（不跨天）
+        # 检查当前时间是否 >= 15:00（同一天）
+        signal_date = signal_time[:10] if signal_time else ''
+        # 从total_bars获取当前时间（通过df）
+        # 简化：检查是否已到当天15:00（通过外部传入的current_time判断）
+        # 这里用 total_bars 和 signal_bar 的差值来估算时间（1bar=1分钟）
+        # 但更可靠的是：在调用处直接判断当前时间 >= 15:00
+        # 此处保留接口，实际判断移到调用处
+        return False  # 旧的90分钟逻辑已移除，改用15:00判断
 
         # 标记已评估
         setattr(self, eval_notified_attr, True)
@@ -1277,15 +1283,18 @@ class PAMonitor:
         return True
 
     def check_buyback_and_stoploss(self, current_price, current_time, total_bars=None):
-        """卖出后追踪：回买提醒 + 90分钟窗口评估（v15.3：止损不终止追踪，90分钟后评估信号成败）"""
+        """卖出后追踪：回买提醒 + 当天15:00收盘评估
+        说明：评估在当天15:00收盘时进行，不跨天
+              30分钟冷静期自然过期，卖出成功/止损不影响状态
+        """
         if not self.sell_active:
             return
 
-        # v16.1.2 FIX: 更新90分钟窗口内最低价追踪
+        # v16.1.2 FIX: 更新当天窗口内最低价追踪
         if self.sell_window_min_price is None or current_price < self.sell_window_min_price:
             self.sell_window_min_price = current_price
 
-        # 到达目标买回价（成功）
+        # 到达目标买回价（推送提醒，不影响状态）
         if not self.buyback_notified and current_price <= self.target_buy_price:
             self.buyback_notified = True
             diff = self.sell_price - current_price
@@ -1299,17 +1308,11 @@ class PAMonitor:
             )
             notify("🎯 回买提醒 — 到价了！", msg, level="remind")
             self.logger.info(f"🎯 回买提醒：当前价{current_price} ≤ 目标{self.target_buy_price}")
-            self.sell_active = False
-            self.sell_window_min_price = None  # 清理窗口追踪
             # 更新信号历史状态：倒T成功
             update_signal_status(self.sell_time, "sell", "成功", diff * 1000)
-            # v15.2 智能冷却：信号完成（回买成功），立即解锁冷却期
-            if total_bars is not None:
-                self.last_signal_bar = total_bars - 1 - STRATEGY_CONFIG['COOLDOWN_BARS']
-                self.logger.info(f"🔓 智能冷却解锁：倒T信号完成（回买成功），冷却期立即解除")
             return
 
-        # v15.3: 价格反转保护（止损）——不再终止追踪，只做风险提示
+        # v15.3: 价格反转保护（止损）——只做风险提示，不影响状态
         if not self.sell_stop_loss_triggered and current_price > self.stop_loss_price:
             self.sell_stop_loss_triggered = True
             msg = (
@@ -1319,45 +1322,46 @@ class PAMonitor:
                 f"止损价格：{self.stop_loss_price}元\n\n"
                 f"⚠️ 风险提示，仅供参考！\n"
                 f"价格不跌反涨，但不等于信号失败。\n"
-                f"系统将在90分钟窗口内继续评估信号有效性。\n"
+                f"系统将在当天收盘(15:00)评估信号有效性。\n"
                 f"是否买回请自行判断。"
             )
             notify("⚠️ 价格反转保护 — 风险提示", msg, level="remind")
-            self.logger.info(f"⚠️ 价格反转保护：当前价{current_price} > 止损{self.stop_loss_price}，继续90分钟窗口评估")
-            # 注意：不再关闭 sell_active，也不解锁冷却期
-            # 90分钟窗口到期后会自动评估并结束追踪
+            self.logger.info(f"⚠️ 价格反转保护：当前价{current_price} > 止损{self.stop_loss_price}，继续追踪至15:00")
             return
 
-        # v15.3: 90分钟窗口评估
-        if total_bars is not None and self.sell_stop_loss_triggered and not self.sell_eval_notified:
-            window_min = self.sell_window_min_price if self.sell_window_min_price is not None else current_price
-            if self._do_window_evaluation(
-                signal_type='倒T',
-                window_price=window_min,
-                threshold=self.sell_price - 0.25,
-                is_greater_than=False,
-                signal_time=self.sell_time,
-                direction='sell',
-                signal_price=self.sell_price,
-                total_bars=total_bars,
-                signal_bar=self.sell_signal_bar,
-                eval_notified_attr='sell_eval_notified',
-                active_attr='sell_active',
-                window_price_attr='sell_window_min_price',
-                success_profit_calc=lambda: (self.sell_price - current_price) * 1000
-            ):
-                return
-
-        # 评估完成后关闭追踪（未触发止损也到期的情况）
-        if self.sell_eval_notified:
+        # 当天15:00收盘评估（仅推送结果，不影响任何状态）
+        if not self.sell_eval_notified and current_time:
+            t_str = str(current_time)
+            if len(t_str) >= 13:
+                hour = int(t_str[11:13])
+                minute = int(t_str[14:16])
+                if hour > 15 or (hour == 15 and minute >= 0):
+                    self.sell_eval_notified = True
+                    window_min = self.sell_window_min_price if self.sell_window_min_price is not None else current_price
+                    # 用动态目标差价评估（与卖出时一致）
+                    eval_target = STRATEGY_CONFIG['TARGET_DIFF_NORMAL']  # 默认
+                    if window_min <= self.sell_price - eval_target:
+                        result = "✅ 成功"
+                        self.logger.info(f"倒T收盘评估：成功（窗口最低{window_min:.2f} <= {self.sell_price - eval_target:.2f}）")
+                    else:
+                        result = "❌ 失败"
+                        self.logger.info(f"倒T收盘评估：失败（窗口最低{window_min:.2f} > {self.sell_price - eval_target:.2f}）")
+                    msg = (
+                        f"📋 倒T 收盘评估（15:00）\n\n"
+                        f"卖出价：{self.sell_price}元（{self.sell_time}）\n"
+                        f"窗口最低：{window_min:.2f}元\n\n"
+                        f"评估结果：{result}\n"
+                        f"（评估标准：当天最低 <= 卖出价-{eval_target}）"
+                    )
+                    notify(f"📋 倒T收盘评估 — {result}", msg, level="info")
             return
 
     def check_zhengt_sell_and_stoploss(self, current_price, current_time, total_bars=None):
-        """正T买入后追踪：卖出提醒 + 90分钟窗口评估
-        说明：90分钟窗口仅推送评估结果，不影响任何追踪状态
+        """正T买入后追踪：卖出提醒 + 当天15:00收盘评估
+        说明：评估在当天15:00收盘时进行，不跨天，不用90分钟窗口
               唯一制约下次正T触发的是 last_zhengt_signal_bar（30分钟冷静期）
         """
-        # v16.1.2 FIX: 更新90分钟窗口内最高价追踪
+        # v16.1.2 FIX: 更新当天窗口内最高价追踪
         if self.zhengt_window_max_price is None or current_price > self.zhengt_window_max_price:
             self.zhengt_window_max_price = current_price
 
@@ -1389,33 +1393,37 @@ class PAMonitor:
                 f"止损价格：{self.zhengt_stop_loss_price}元\n\n"
                 f"⚠️ 风险提示，仅供参考！\n"
                 f"价格继续下跌，但不等于信号失败。\n"
-                f"系统将在90分钟窗口内继续评估信号有效性。\n"
+                f"系统将在当天收盘(15:00)评估信号有效性。\n"
                 f"是否卖出请自行判断。"
             )
             notify("⚠️ 正T风险提示 — 仅供参考", msg, level="remind")
-            self.logger.info(f"⚠️ 正T风险提示：当前价{current_price} < 止损{self.zhengt_stop_loss_price}，继续90分钟窗口评估")
+            self.logger.info(f"⚠️ 正T风险提示：当前价{current_price} < 止损{self.zhengt_stop_loss_price}，继续追踪至15:00")
             return
 
-        # v15.3: 90分钟窗口评估（仅推送结果，不影响任何状态）
-        if total_bars is not None and self.zhengt_stop_loss_triggered and not self.zhengt_eval_notified:
-            window_max = self.zhengt_window_max_price if self.zhengt_window_max_price is not None else current_price
-            elapsed = total_bars - self.zhengt_signal_bar
-            if elapsed >= STRATEGY_CONFIG['EVAL_WINDOW_BARS']:
-                self.zhengt_eval_notified = True
-                if window_max >= self.zhengt_buy_price + 0.20:
-                    result = "✅ 成功"
-                    self.logger.info(f"正T90分钟窗口评估：成功（窗口最高{window_max:.2f} >= {self.zhengt_buy_price + 0.20:.2f}）")
-                else:
-                    result = "❌ 失败"
-                    self.logger.info(f"正T90分钟窗口评估：失败（窗口最高{window_max:.2f} < {self.zhengt_buy_price + 0.20:.2f}）")
-                msg = (
-                    f"📋 正T 90分钟窗口评估\n\n"
-                    f"买入价：{self.zhengt_buy_price}元（{self.zhengt_buy_time}）\n"
-                    f"窗口最高：{window_max:.2f}元\n\n"
-                    f"评估结果：{result}\n"
-                    f"（评估标准：90分钟内最高 > 买入价+0.20）"
-                )
-                notify(f"📋 正T窗口评估 — {result}", msg, level="info")
+        # 当天15:00收盘评估（仅推送结果，不影响任何状态）
+        if not self.zhengt_eval_notified and current_time:
+            # 检查是否已到当天15:00（不跨天）
+            t_str = str(current_time)
+            if len(t_str) >= 13:
+                hour = int(t_str[11:13])
+                minute = int(t_str[14:16])
+                if hour > 15 or (hour == 15 and minute >= 0):
+                    self.zhengt_eval_notified = True
+                    window_max = self.zhengt_window_max_price if self.zhengt_window_max_price is not None else current_price
+                    if window_max >= self.zhengt_buy_price + STRATEGY_CONFIG['ZHENGT_TARGET_DIFF']:
+                        result = "✅ 成功"
+                        self.logger.info(f"正T收盘评估：成功（窗口最高{window_max:.2f} >= {self.zhengt_buy_price + STRATEGY_CONFIG['ZHENGT_TARGET_DIFF']:.2f}）")
+                    else:
+                        result = "❌ 失败"
+                        self.logger.info(f"正T收盘评估：失败（窗口最高{window_max:.2f} < {self.zhengt_buy_price + STRATEGY_CONFIG['ZHENGT_TARGET_DIFF']:.2f}）")
+                    msg = (
+                        f"📋 正T 收盘评估（15:00）\n\n"
+                        f"买入价：{self.zhengt_buy_price}元（{self.zhengt_buy_time}）\n"
+                        f"窗口最高：{window_max:.2f}元\n\n"
+                        f"评估结果：{result}\n"
+                        f"（评估标准：当天最高 > 买入价+{STRATEGY_CONFIG['ZHENGT_TARGET_DIFF']}）"
+                    )
+                    notify(f"📋 正T收盘评估 — {result}", msg, level="info")
             return
 
 
