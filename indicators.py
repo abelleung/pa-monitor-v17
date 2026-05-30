@@ -12,40 +12,40 @@ from datetime import datetime
 STRATEGY_CONFIG = {
     # v14.0 BOLL上轨补充策略参数（降级为补充策略）v16.5更新
     'BOLL_AMOUNT_THRESH_WAN': 3000,
-    'BOLL_MA_ABOVE': 0.10,
+    'BOLL_MA_ABOVE': 0.1,
     'BOLL_MACD_THRESH': 0.06,
     'BOLL_DEVIATION_THRESH': 0.3,
-    'BOLL_TOUCH_RATIO': 0.995,
-    'BOLL_DAY_GAIN_MAX': 2.0,        # v16.5当日涨幅≤2.0%（防追高）
-    'BOLL_PULLBACK_FROM_HIGH': 0.10,  # v16.5从当日最高回落>0.10元
+    'BOLL_TOUCH_RATIO': 1.0,
+    'BOLL_DAY_GAIN_MAX': 2.0,
+    'BOLL_PULLBACK_FROM_HIGH': 0.1,
 
     # 低波动日备用策略参数（冲高回落）v16.5更新
-    'PULLBACK_AMOUNT_THRESH_WAN': 4000,    # v16.5提升（原3000万）
-    'PULLBACK_DAY_HIGH_DEVIATION': 0.20,
-    'PULLBACK_PULLBACK_FROM_HIGH': 0.15,  # v16.5收紧（原0.20）
-    'PULLBACK_CLOSE_ABOVE_AVG': 0.20,
+    'PULLBACK_AMOUNT_THRESH_WAN': 2000,
+    'PULLBACK_DAY_HIGH_DEVIATION': 0.2,
+    'PULLBACK_PULLBACK_FROM_HIGH': 0.15,
+    'PULLBACK_CLOSE_ABOVE_AVG': 0.2,
     'PULLBACK_START': (9, 40),
-    'PULLBACK_END': (14, 0),          # v16.5延长（原13:30）
-    'PULLBACK_BANDWIDTH_THRESH': 1.5,     # BOLL带宽>1.5元（防窄幅震荡）
+    'PULLBACK_END': (14, 0),
+    'PULLBACK_BANDWIDTH_THRESH': 1.5,
 
     # v14.0 动量策略参数（主力策略）
     'ZHANGDIE_THRESH': 100,
-    'FENGXIAN_THRESH': 85,
+    'FENGXIAN_THRESH': 90,
     'AMOUNT_THRESH_WAN': 3000,
-    'MA_ABOVE': 0.10,
+    'MA_ABOVE': 0.1,
     'MACD_BAR_THRESH': 0.06,
 
     # 正T策略参数（买入）v16.5
-    'ZHENGT_MA_BELOW': 0.55,          # v16.5收紧（原0.40）
-    'ZHENGT_RISK_THRESH': 12,            # v16.5调整（原10）
+    'ZHENGT_MA_BELOW': 0.35,
+    'ZHENGT_RISK_THRESH': 12,
     'ZHENGT_AMOUNT_THRESH_WAN': 5000,
-    'ZHENGT_ZD_THRESH': -1,              # v16.5收紧（原0）
-    'ZHENGT_MIN_AMPLITUDE': 0.40,        # v16.5收紧（原0.80）
-    'ZHENGT_MIN_BOLL_WIDTH': 0.1,        # v16.5防极窄震荡（元，非百分比）
+    'ZHENGT_ZD_THRESH': -1,
+    'ZHENGT_MIN_AMPLITUDE': 0.4,
+    'ZHENGT_MIN_BOLL_WIDTH': 0.1,
     'ZHENGT_LATEST_HOUR': 14,
     'ZHENGT_MAX_CONSEC_DOWN': 2,
-    'ZHENGT_TARGET_DIFF': 0.25,           # v16.5固定0.25元
-    'ZHENGT_STOP_LOSS_DIFF': 0.15,
+    'ZHENGT_TARGET_DIFF': 0.25,
+    'ZHENGT_STOP_LOSS_DIFF': 0.2,
 
     # 共用参数
     'TRADE_START': (9, 40),

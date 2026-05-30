@@ -1,0 +1,87 @@
+[
+  {
+    "sharpe_ratio": 5.841722718282386,
+    "win_rate": 63.07692307692307,
+    "max_drawdown_pct": 6.451612903225843,
+    "total_return": 9.149999999999963,
+    "total_trades": 65,
+    "params": {
+      "ZHENGT_MA_BELOW": 0.35,
+      "ZHENGT_RISK_THRESH": 12,
+      "ZHENGT_AMOUNT_THRESH_WAN": 7000,
+      "ZHENGT_ZD_THRESH": -1,
+      "ZHENGT_MIN_AMPLITUDE": 0.2,
+      "ZHENGT_MIN_BOLL_WIDTH": 0.5,
+      "ZHENGT_TARGET_DIFF": 0.25,
+      "ZHENGT_STOP_LOSS_DIFF": 0.2
+    }
+  },
+  {
+    "sharpe_ratio": 5.841722718282386,
+    "win_rate": 63.07692307692307,
+    "max_drawdown_pct": 6.451612903225843,
+    "total_return": 9.149999999999963,
+    "total_trades": 65,
+    "params": {
+      "ZHENGT_MA_BELOW": 0.35,
+      "ZHENGT_RISK_THRESH": 12,
+      "ZHENGT_AMOUNT_THRESH_WAN": 7000,
+      "ZHENGT_ZD_THRESH": -1,
+      "ZHENGT_MIN_AMPLITUDE": 0.4,
+      "ZHENGT_MIN_BOLL_WIDTH": 0.5,
+      "ZHENGT_TARGET_DIFF": 0.25,
+      "ZHENGT_STOP_LOSS_DIFF": 0.2
+    }
+  },
+  {
+    "sharpe_ratio": 5.841722718282386,
+    "win_rate": 63.07692307692307,
+    "max_drawdown_pct": 6.451612903225843,
+    "total_return": 9.149999999999963,
+    "total_trades": 65,
+    "params": {
+      "ZHENGT_MA_BELOW": 0.35,
+      "ZHENGT_RISK_THRESH": 12,
+      "ZHENGT_AMOUNT_THRESH_WAN": 7000,
+      "ZHENGT_ZD_THRESH": -1,
+      "ZHENGT_MIN_AMPLITUDE": 0.8,
+      "ZHENGT_MIN_BOLL_WIDTH": 0.5,
+      "ZHENGT_TARGET_DIFF": 0.25,
+      "ZHENGT_STOP_LOSS_DIFF": 0.2
+    }
+  },
+  {
+    "sharpe_ratio": 5.841722718282386,
+    "win_rate": 63.07692307692307,
+    "max_drawdown_pct": 6.451612903225843,
+    "total_return": 9.149999999999963,
+    "total_trades": 65,
+    "params": {
+      "ZHENGT_MA_BELOW": 0.35,
+      "ZHENGT_RISK_THRESH": 20,
+      "ZHENGT_AMOUNT_THRESH_WAN": 7000,
+      "ZHENGT_ZD_THRESH": -1,
+      "ZHENGT_MIN_AMPLITUDE": 0.2,
+      "ZHENGT_MIN_BOLL_WIDTH": 0.5,
+      "ZHENGT_TARGET_DIFF": 0.25,
+      "ZHENGT_STOP_LOSS_DIFF": 0.2
+    }
+  },
+  {
+    "sharpe_ratio": 5.841722718282386,
+    "win_rate": 63.07692307692307,
+    "max_drawdown_pct": 6.451612903225843,
+    "total_return": 9.149999999999963,
+    "total_trades": 65,
+    "params": {
+      "ZHENGT_MA_BELOW": 0.35,
+      "ZHENGT_RISK_THRESH": 20,
+      "ZHENGT_AMOUNT_THRESH_WAN": 7000,
+      "ZHENGT_ZD_THRESH": -1,
+      "ZHENGT_MIN_AMPLITUDE": 0.4,
+      "ZHENGT_MIN_BOLL_WIDTH": 0.5,
+      "ZHENGT_TARGET_DIFF": 0.25,
+      "ZHENGT_STOP_LOSS_DIFF": 0.2
+    }
+  }
+]

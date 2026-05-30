@@ -1,0 +1,72 @@
+[
+  {
+    "sharpe_ratio": 7.546589694659116,
+    "win_rate": 56.95364238410596,
+    "max_drawdown_pct": 6.511350059737185,
+    "total_return": 16.739999999999977,
+    "total_trades": 151,
+    "params": {
+      "ZHANGDIE_THRESH": 60,
+      "FENGXIAN_THRESH": 75,
+      "AMOUNT_THRESH_WAN": 2000,
+      "MA_ABOVE": 0.05,
+      "MACD_BAR_THRESH": 0.04
+    }
+  },
+  {
+    "sharpe_ratio": 7.394566416387067,
+    "win_rate": 57.34265734265735,
+    "max_drawdown_pct": 7.556675062972317,
+    "total_return": 15.87999999999996,
+    "total_trades": 143,
+    "params": {
+      "ZHANGDIE_THRESH": 60,
+      "FENGXIAN_THRESH": 80,
+      "AMOUNT_THRESH_WAN": 2000,
+      "MA_ABOVE": 0.1,
+      "MACD_BAR_THRESH": 0.04
+    }
+  },
+  {
+    "sharpe_ratio": 7.371806869339042,
+    "win_rate": 56.94444444444444,
+    "max_drawdown_pct": 7.667731629392993,
+    "total_return": 15.649999999999968,
+    "total_trades": 144,
+    "params": {
+      "ZHANGDIE_THRESH": 60,
+      "FENGXIAN_THRESH": 70,
+      "AMOUNT_THRESH_WAN": 2000,
+      "MA_ABOVE": 0.1,
+      "MACD_BAR_THRESH": 0.04
+    }
+  },
+  {
+    "sharpe_ratio": 7.371806869339042,
+    "win_rate": 56.94444444444444,
+    "max_drawdown_pct": 7.667731629392993,
+    "total_return": 15.649999999999968,
+    "total_trades": 144,
+    "params": {
+      "ZHANGDIE_THRESH": 60,
+      "FENGXIAN_THRESH": 75,
+      "AMOUNT_THRESH_WAN": 2000,
+      "MA_ABOVE": 0.1,
+      "MACD_BAR_THRESH": 0.04
+    }
+  },
+  {
+    "sharpe_ratio": 7.33567379645143,
+    "win_rate": 56.666666666666664,
+    "max_drawdown_pct": 6.7076923076923425,
+    "total_return": 16.249999999999968,
+    "total_trades": 150,
+    "params": {
+      "ZHANGDIE_THRESH": 60,
+      "FENGXIAN_THRESH": 80,
+      "AMOUNT_THRESH_WAN": 2000,
+      "MA_ABOVE": 0.05,
+      "MACD_BAR_THRESH": 0.04
+    }
+  }
+]
