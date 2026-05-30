@@ -1,14 +1,14 @@
 """
-中国平安(601318) v16.1.2 三策略倒T+正T策略 — 实盘监控系统
+中国平安(601318) v17.0 三策略倒T+正T策略 — 实盘监控系统
 
-v16.1.2 正T/倒T互斥解除（2026-04-27）：
+v17.0 正T/倒T互斥解除（2026-04-27）：
   - 正T和倒T不再互斥，各自独立触发、独立冷却
   - 倒T冷却期不再阻塞正T信号判断
   - 72天回测对比：互斥14次正T vs 不互斥16次（+3个信号，100%@0.20）
   - 心跳、收盘提醒、仓位追踪均支持双向同时运行
 
-v16.1.1 冲高回落策略v16.0重构部署（2026-04-27）：
-  - 冲高回落从v14.1（8条件）重构为v16.0（6条件）
+v17.0 冲高回落策略v17.0重构部署（2026-04-27）：
+  - 冲高回落从v14.1（8条件）重构为v17.0（6条件）
   - 去掉"高点递减×2"→改为"从盘中最高点回落>0.20元"
   - 去掉"偏离均价>0.35"→改为"盘中最高点偏离均价>0.20元"
   - 去掉"量能萎缩<80%"（与冲高互斥，冲高时往往放量）
@@ -18,7 +18,7 @@ v16.1.1 冲高回落策略v16.0重构部署（2026-04-27）：
   - 72天全量回测：36信号/83.3%@0.25/86.1%@0.20/均差价0.763元
   - 推送消息和接近触发日志同步更新
 
-v16.1 正T策略优化（2026-04-27）：
+v17.0 正T策略优化（2026-04-27）：
   - 新增BOLL带宽>1%硬约束（回测59天/88信号：胜率从72%→83%@0.20目标）
     * BOLL>1%是最大胜率提升器（+10pp），过滤极窄带宽日的无效信号
     * 极窄带宽(BOLL<1%)意味着市场萎缩、缺乏弹性，正T反弹无力
@@ -129,7 +129,7 @@ v13.0 重大升级（2026-04-08）：
   - 倒T条件：触碰BOLL上轨 + 额≥3000万 + 股价>均价+0.1 + 带宽>1.9% + 偏离>0.3 + MACD>0.06
   - 移除涨跌>100、风险>85条件，改用BOLL带宽+偏离日均价过滤
   - 保留正T买入策略（方案二参数）
-  - v16.1.2：倒T和正T不再互斥，各自独立触发（正T有独立冷却期）
+  - v17.0：倒T和正T不再互斥，各自独立触发（正T有独立冷却期）
 
 v12.0 历史（2026-04-08）：
   - 新增正T买入策略（方案二参数）
@@ -216,7 +216,7 @@ from pytdx.hq import TdxHq_API
 from pa_notify import notify
 
 # 导入增强复盘报告模块
-# v16.1.2: 指标和策略函数已解耦到独立文件
+# v17.0: 指标和策略函数已解耦到独立文件
 from indicators import (
     calc_indicators,
     estimate_daily_amount_and_amplitude,
@@ -385,7 +385,7 @@ def load_config() -> dict:
         return {}
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         config = json.load(f)
-    # v16.1.2: 从配置文件覆盖策略参数
+    # v17.0: 从配置文件覆盖策略参数
     if 'strategy' in config:
         STRATEGY_CONFIG.update(config['strategy'])
         logging.getLogger(__name__).info(f"已从配置文件覆盖 {len(config['strategy'])} 个策略参数")
@@ -722,7 +722,7 @@ class PAMonitor:
 
         # === 日内数据记录（用于CSV导出） ===
         self.daily_bars = []  # 存储今天所有已处理K线的指标数据
-        self.hb_cache = {}  # v16.1.2: 心跳缓存（改为实例变量，便于提取心跳方法）
+        self.hb_cache = {}  # v17.0: 心跳缓存（改为实例变量，便于提取心跳方法）
 
         # === 日报统计 ===
         self.daily_stats = {
@@ -807,7 +807,7 @@ class PAMonitor:
                 return
             # 按时间排序
             df = df.sort_values('时间').reset_index(drop=True)
-            # v16.1.2: 确保数值列类型正确（CSV可能读为字符串）
+            # v17.0: 确保数值列类型正确（CSV可能读为字符串）
             numeric_cols = ['开盘', '最高', '最低', '收盘', '成交量', '成交额']
             for col in numeric_cols:
                 if col in df.columns:
@@ -1025,7 +1025,7 @@ class PAMonitor:
 
         msg = (
             f"📅 {today_str} {weekday}\n\n"
-            f"🐷 肥洪量化 v16.1.2 监控已启动\n"
+            f"🐷 肥洪量化 v17.0 监控已启动\n"
             f"📊 股票：中国平安 (601318)\n"
             f"⏰ 监控时段：09:40 ~ 14:30\n"
             f"🎯 目标差价：{TARGET_DIFF}元\n"
@@ -1290,7 +1290,7 @@ class PAMonitor:
         if not self.sell_active:
             return
 
-        # v16.5 FIX: 仅从触发后下一根K线开始追踪窗口内最低价
+        # v17.0 FIX: 仅从触发后下一根K线开始追踪窗口内最低价
         if total_bars is not None and total_bars - 1 > self.sell_signal_bar:
             if self.sell_window_min_price is None or current_price < self.sell_window_min_price:
                 self.sell_window_min_price = current_price
@@ -1378,7 +1378,7 @@ class PAMonitor:
         说明：评估在当天15:00收盘时进行，不跨天，不用90分钟窗口
               唯一制约下次正T触发的是 last_zhengt_signal_bar（30分钟冷静期）
         """
-        # v16.5 FIX: 仅从触发后下一根K线开始追踪窗口内最高价
+        # v17.0 FIX: 仅从触发后下一根K线开始追踪窗口内最高价
         if total_bars is not None and total_bars - 1 > self.zhengt_signal_bar:
             if self.zhengt_window_max_price is None or current_price > self.zhengt_window_max_price:
                 self.zhengt_window_max_price = current_price
@@ -1451,13 +1451,13 @@ class PAMonitor:
         检查倒T三策略信号（动量/BOLL/冲高回落）
         返回: (triggered, details, strategy_type, is_low_volatility, momentum_details, boll_details, pullback_details)
         """
-        # v16.1.2: 倒T冷却期检查
+        # v17.0: 倒T冷却期检查
         in_daot_cooldown = (total_bars - 1 - self.last_signal_bar) < STRATEGY_CONFIG['COOLDOWN_BARS']
 
         if in_daot_cooldown:
             return False, None, None, False, None, None, None
 
-        # v16.5: 暴跌/暴涨保护
+        # v17.0: 暴跌/暴涨保护
         # 暴跌保护：日内跌幅>2.0%跳过所有倒T信号
         day_drop_pct = 0
         if self.daily_stats.get('prev_close', 0) > 0 and completed['收盘'] < self.daily_stats['prev_close']:
@@ -1528,7 +1528,7 @@ class PAMonitor:
         if (total_bars - 1 - self.last_zhengt_signal_bar) < STRATEGY_CONFIG['COOLDOWN_BARS']:
             return False, None
 
-        # v16.5: 暴涨保护：日内涨幅>3.0%跳过正T买入
+        # v17.0: 暴涨保护：日内涨幅>3.0%跳过正T买入
         prev_close = self.daily_stats.get('prev_close', 0)
         if prev_close > 0:
             day_gain_pct = (completed['收盘'] - prev_close) / prev_close * 100
@@ -1546,7 +1546,7 @@ class PAMonitor:
         if self.daily_stats.get('consecutive_down_days', 0) > STRATEGY_CONFIG['ZHENGT_MAX_CONSEC_DOWN']:
             return False, None
 
-        # v16.1: 传入当日振幅 + BOLL带宽用于硬约束判断
+        # v17.0: 传入当日振幅 + BOLL带宽用于硬约束判断
         hp = self.daily_stats.get('high_price')
         lp = self.daily_stats.get('low_price')
         if hp is None or lp is None:
@@ -1579,7 +1579,7 @@ class PAMonitor:
     def run(self):
         """主运行循环"""
         self.logger.info("=" * 60)
-        self.logger.info("  中国平安 v16.1.2 三策略倒T+正T策略监控系统 启动")
+        self.logger.info("  中国平安 v17.0 三策略倒T+正T策略监控系统 启动")
         self.logger.info(f"  股票: {self.config.get('stock_code', '601318')} {self.config.get('stock_name', '中国平安')}")
         self.logger.info("  【策略1: 动量倒T卖出】主力策略（v14.0恢复v10.2，59天回测：80.6%胜率）")
         self.logger.info(f"    条件: 涨跌>{STRATEGY_CONFIG['ZHANGDIE_THRESH']} + 风险>{STRATEGY_CONFIG['FENGXIAN_THRESH']} + 额≥{STRATEGY_CONFIG['AMOUNT_THRESH_WAN']}万")
@@ -1587,11 +1587,11 @@ class PAMonitor:
         self.logger.info("  【策略2: BOLL上轨倒T卖出】补充策略（v14.0去掉带宽条件）")
         self.logger.info(f"    条件: 触碰BOLL上轨(≥{STRATEGY_CONFIG['BOLL_TOUCH_RATIO']*100:.1f}%) + 额≥{STRATEGY_CONFIG['BOLL_AMOUNT_THRESH_WAN']}万")
         self.logger.info(f"           股价>均价+{STRATEGY_CONFIG['BOLL_MA_ABOVE']} + 偏离均价>{STRATEGY_CONFIG['BOLL_DEVIATION_THRESH']} + MACD柱>{STRATEGY_CONFIG['BOLL_MACD_THRESH']}")
-        self.logger.info("  【策略3: 冲高回落倒T卖出】低波动日备用（v16.0重构）")
+        self.logger.info("  【策略3: 冲高回落倒T卖出】低波动日备用（v17.0重构）")
         self.logger.info(f"    适用: 低波动日(带宽<{STRATEGY_CONFIG['PULLBACK_BANDWIDTH_THRESH']}元)")
         self.logger.info(f"    条件: 盘中最高偏离均价>{STRATEGY_CONFIG['PULLBACK_DAY_HIGH_DEVIATION']} + 从高点回落>{STRATEGY_CONFIG['PULLBACK_PULLBACK_FROM_HIGH']} + 收盘偏离均价>{STRATEGY_CONFIG['PULLBACK_CLOSE_ABOVE_AVG']} + 额≥{STRATEGY_CONFIG['PULLBACK_AMOUNT_THRESH_WAN']}万")
         self.logger.info(f"           已从上轨回落 + 时间{STRATEGY_CONFIG['PULLBACK_START'][0]}:{STRATEGY_CONFIG['PULLBACK_START'][1]:02d}-{STRATEGY_CONFIG['PULLBACK_END'][0]}:{STRATEGY_CONFIG['PULLBACK_END'][1]:02d}")
-        self.logger.info("  【正T买入策略】v16.1 极低位高胜率组合 + BOLL带宽约束（90min窗口回测83%胜率@0.20目标）")
+        self.logger.info("  【正T买入策略】v17.0 极低位高胜率组合 + BOLL带宽约束（90min窗口回测83%胜率@0.20目标）")
         self.logger.info(f"    条件: 偏离均价>{STRATEGY_CONFIG['ZHENGT_MA_BELOW']}元 + 风险<{STRATEGY_CONFIG['ZHENGT_RISK_THRESH']} + 额≥{STRATEGY_CONFIG['ZHENGT_AMOUNT_THRESH_WAN']}万")
         self.logger.info(f"           涨跌≤{STRATEGY_CONFIG['ZHENGT_ZD_THRESH']} + 日振幅≥{STRATEGY_CONFIG['ZHENGT_MIN_AMPLITUDE']}元 + BOLL带宽>{STRATEGY_CONFIG['ZHENGT_MIN_BOLL_WIDTH']}%")
         self.logger.info(f"    硬约束: {STRATEGY_CONFIG['ZHENGT_LATEST_HOUR']}:00后不做 + 连跌>{STRATEGY_CONFIG['ZHENGT_MAX_CONSEC_DOWN']}天不做")
@@ -2091,7 +2091,7 @@ class PAMonitor:
                     bar_data['买卖力道'] = round(float(latest['买卖力道']), 1)
                 self.daily_bars.append(bar_data)
 
-                # v16.2: 盘中实时导出数据给API（每分钟写JSON）
+                # v17.0: 盘中实时导出数据给API（每分钟写JSON）
                 try:
                     realtime_path = DATA_DIR / 'realtime_bars.json'
                     with open(realtime_path, 'w', encoding='utf-8') as _f:
@@ -2116,11 +2116,11 @@ class PAMonitor:
                     time.sleep(check_interval)
                     continue
 
-                # v16.1.2: 倒T信号检查（三策略：动量/BOLL/冲高回落）
+                # v17.0: 倒T信号检查（三策略：动量/BOLL/冲高回落）
                 total_bars = len(df)
                 triggered, details, strategy_type, is_low_volatility, momentum_details, boll_details, pullback_details = self._check_daot_signals(df, completed, total_bars)
 
-                # v16.1.2: 正T信号检查
+                # v17.0: 正T信号检查
                 zhengt_triggered, zhengt_details = self._check_zhengt_signals(df, completed, total_bars)
 
                 # 提前计算量能预估（供倒T和正T信号共用）
@@ -2148,7 +2148,7 @@ class PAMonitor:
                     self.sell_active = True
                     sell_price = details.get('价格', 0)
                     self.sell_price = sell_price
-                    self.sell_window_min_price = None  # v16.5: 窗口从下一根K线开始追踪
+                    self.sell_window_min_price = None  # v17.0: 窗口从下一根K线开始追踪
                     self.sell_time = details.get('时间', '')
                     self.buyback_notified = False
                     self.sell_stop_loss_triggered = False  # v15.3: 重置止损触发标志
@@ -2209,7 +2209,7 @@ class PAMonitor:
                         ]
                         cond_marks = ["✅" if c else "❌" for c in details.get('满足条件', {}).values()]
                         strategy_badge = "📊 BOLL补充策略"
-                    else:  # 冲高回落策略 v16.0
+                    else:  # 冲高回落策略 v17.0
                         high_price = details.get('最高', 0)
                         day_high_price = details.get('盘中最高', 0)
                         high_diff_from_avg = details.get('盘中最高偏离均价', 0)
@@ -2227,7 +2227,7 @@ class PAMonitor:
                             f"时间窗口 {STRATEGY_CONFIG['PULLBACK_START'][0]}:{STRATEGY_CONFIG['PULLBACK_START'][1]:02d}-{STRATEGY_CONFIG['PULLBACK_END'][0]}:{STRATEGY_CONFIG['PULLBACK_END'][1]:02d}",
                         ]
                         cond_marks = ["✅" if c else "❌" for c in details.get('满足条件', {}).values()]
-                        strategy_badge = "📉 冲高回落v16.0（低波动日）"
+                        strategy_badge = "📉 冲高回落v17.0（低波动日）"
                     
                     sell_price = details.get('价格', 0)
                     msg = (
@@ -2292,7 +2292,7 @@ class PAMonitor:
                     self.zhengt_buy_active = True
                     zhengt_price = zhengt_details.get('价格', 0)
                     self.zhengt_buy_price = zhengt_price
-                    self.zhengt_window_max_price = None  # v16.5: 窗口从下一根K线开始追踪
+                    self.zhengt_window_max_price = None  # v17.0: 窗口从下一根K线开始追踪
                     self.zhengt_buy_time = zhengt_details.get('时间', '')
                     # v15.1: 正T使用专用目标差价（0.20元），不再与倒T共用
                     self.zhengt_target_sell_price = round(zhengt_price + STRATEGY_CONFIG['ZHENGT_TARGET_DIFF'], 2)
@@ -2368,7 +2368,7 @@ class PAMonitor:
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="中国平安A股盯盘系统 v16.1.2")
+    parser = argparse.ArgumentParser(description="中国平安A股盯盘系统 v17.0")
     parser.add_argument("--simulate", metavar="CSV", help="模拟测试模式：指定历史K线CSV文件")
     parser.add_argument("--speed", type=float, default=60.0, help="模拟播放速度倍率（默认60=1分钟K线用1秒跑完）")
     args = parser.parse_args()

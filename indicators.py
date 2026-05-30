@@ -8,10 +8,10 @@ import pandas as pd
 from datetime import datetime
 
 # ==================== 策略参数配置（集中管理，支持配置文件覆盖）====================
-# v16.1.2: 所有策略常量集中到此字典，从 monitor_config.json 的 strategy 节可覆盖
+# v17.0: 所有策略常量集中到此字典，从 monitor_config.json 的 strategy 节可覆盖
 # ⚠️ 键名必须与 strategies.py 和 pa_monitor.py 中的引用完全一致！
 STRATEGY_CONFIG = {
-    # v14.0 BOLL上轨补充策略参数（降级为补充策略）v16.5更新
+    # v14.0 BOLL上轨补充策略参数（降级为补充策略）v17.0更新
     'BOLL_AMOUNT_THRESH_WAN': 3000,
     'BOLL_MA_ABOVE': 0.1,
     'BOLL_MACD_THRESH': 0.06,
@@ -20,7 +20,7 @@ STRATEGY_CONFIG = {
     'BOLL_DAY_GAIN_MAX': 2.0,
     'BOLL_PULLBACK_FROM_HIGH': 0.1,
 
-    # 低波动日备用策略参数（冲高回落）v16.5更新
+    # 低波动日备用策略参数（冲高回落）v17.0更新
     'PULLBACK_AMOUNT_THRESH_WAN': 2000,
     'PULLBACK_DAY_HIGH_DEVIATION': 0.2,
     'PULLBACK_PULLBACK_FROM_HIGH': 0.15,
@@ -36,7 +36,7 @@ STRATEGY_CONFIG = {
     'MA_ABOVE': 0.1,
     'MACD_BAR_THRESH': 0.06,
 
-    # 正T策略参数（买入）v16.5
+    # 正T策略参数（买入）v17.0
     'ZHENGT_MA_BELOW': 0.35,
     'ZHENGT_RISK_THRESH': 12,
     'ZHENGT_AMOUNT_THRESH_WAN': 5000,
@@ -55,7 +55,7 @@ STRATEGY_CONFIG = {
     'EVAL_WINDOW_BARS': 90,
     'WARMUP_BARS': 350,
 
-    # 暴跌/暴涨保护 v16.5
+    # 暴跌/暴涨保护 v17.0
     'CRASH_DAY_DROP_MAX': 2.0,   # 日内跌幅>2.0%跳过倒T
     'BOOM_DAY_GAIN_MAX': 3.0,    # 日内涨幅>3.0%跳过正T
 

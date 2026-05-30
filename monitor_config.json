@@ -11,7 +11,7 @@
     "market": 1,
     "data_dir": "/opt/pa-monitor/monitor_data",
     "log_dir": "/Users/abelleung/WorkBuddy/Claw/monitor_logs",
-    "comment": "推送渠道配置（至少填一个）：Bark(iOS)、ntfy(Android/跨平台)、企业微信。Bark: App Store搜索安装后复制URL。ntfy: 安装应用后创建主题如'teresa'。企业微信: 群机器人Webhook地址。",
+    "comment": "推送渠道配置（至少填一个）：Bark(iOS)、ntfy(Android/跨平台)、企业微信。Bark: App Store搜索安装后复制URL。ntfy: 安装应用后创建主题如'teresa'。企业微信: 群机器人Webhook地址。v17.0",
     
     "candlestick_enabled": true,
     "candlestick_boll_tolerance": 0.001,

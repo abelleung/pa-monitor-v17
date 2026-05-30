@@ -8,9 +8,9 @@ from indicators import safe_float, get_time_tuple, STRATEGY_CONFIG
 
 def check_boll_sell_signal(row, logger, day_high=0, config=None):
     """
-    【v14.0补充策略】BOLL上轨倒T卖出信号（v16.5更新）
+    【v14.0补充策略】BOLL上轨倒T卖出信号（v17.0更新）
 
-    v16.5改动：新增当日涨幅≤2.0%防追高 + 从当日最高回落>0.10元
+    v17.0改动：新增当日涨幅≤2.0%防追高 + 从当日最高回落>0.10元
 
     条件（全部满足才触发）：
     1. 最高价 ≥ BOLL上轨 × 0.995（触碰上轨）
@@ -53,7 +53,7 @@ def check_boll_sell_signal(row, logger, day_high=0, config=None):
         '从最高回落': round(day_high - price, 3) if day_high > 0 else 0,
     }
 
-    # BOLL v16.5 卖出条件（7条件）
+    # BOLL v17.0 卖出条件（7条件）
     cond1 = high >= boll_upper * config['BOLL_TOUCH_RATIO']  # 触碰BOLL上轨
     cond2 = amount_wan >= config['BOLL_AMOUNT_THRESH_WAN']    # 成交额≥3000万
     cond3 = price_diff > config['BOLL_MA_ABOVE']              # 股价>日均价+0.1
@@ -133,14 +133,14 @@ def check_momentum_sell_signal(row, logger, config=None):
 
 def check_zhengT_buy_signal(row, logger, amplitude=0, boll_width_pct=0, config=None):
     """
-    检查单根K线是否满足正T买入条件（v16.5 极低位高胜率组合）
+    检查单根K线是否满足正T买入条件（v17.0 极低位高胜率组合）
 
     条件（全部满足）：
-    1. 均价 - 股价 > 0.55元（v16.5收紧，原0.40元）
-    2. 风险 < 12（v16.5调整，原10）
+    1. 均价 - 股价 > 0.55元（v17.0收紧，原0.40元）
+    2. 风险 < 12（v17.0调整，原10）
     3. 成交额 ≥ 5000万（强筛选器）
-    4. 涨跌 ≤ -1（v16.5收紧，原0）
-    5. 日振幅 ≥ 0.40元（v16.5收紧，原0.80元）
+    4. 涨跌 ≤ -1（v17.0收紧，原0）
+    5. 日振幅 ≥ 0.40元（v17.0收紧，原0.80元）
     6. BOLL带宽 > 0.1元（防极窄震荡）
     7. 当前时间 < 14:00（v15.1新增，14点后胜率仅36%）
     8. 连跌天数 ≤ 2天（v15.1新增，连跌>2天胜率骤降）
@@ -169,7 +169,7 @@ def check_zhengT_buy_signal(row, logger, amplitude=0, boll_width_pct=0, config=N
         'BOLL带宽%': round(boll_width_pct, 2),
     }
 
-    # v16.5 极低位高胜率组合（6条件 + 2硬约束）
+    # v17.0 极低位高胜率组合（6条件 + 2硬约束）
     cond1 = price_diff > config['ZHENGT_MA_BELOW']           # 偏离均价 > 0.55元（深度超卖）
     cond2 = fengxian < config['ZHENGT_RISK_THRESH']           # 风险 < 12（超卖确认）
     cond3 = amount_wan >= config['ZHENGT_AMOUNT_THRESH_WAN']   # 成交额 ≥ 5000万（活跃资金）
@@ -185,9 +185,9 @@ def check_zhengT_buy_signal(row, logger, amplitude=0, boll_width_pct=0, config=N
 
 def check_pullback_sell_signal(df, current_idx, logger, day_high=0, config=None):
     """
-    【低波动日备用策略】冲高回落卖出信号检测（v16.5更新）
+    【低波动日备用策略】冲高回落卖出信号检测（v17.0更新）
 
-    v16.5改动：
+    v17.0改动：
     - 成交额阈值从3000万→4000万
     - 回落阈值从0.20元→0.15元（收紧提升胜率）
     - 时间窗口从9:40-13:30→9:40-14:00（延长）
@@ -195,12 +195,12 @@ def check_pullback_sell_signal(df, current_idx, logger, day_high=0, config=None)
 
     触发条件（全部满足，7个条件）：
     1. 盘中最高点偏离均价 > 0.20元（确认是冲高，不是随机波动）
-    2. 从盘中最高回落 > 0.15元（v16.5收紧）
+    2. 从盘中最高回落 > 0.15元（v17.0收紧）
     3. 收盘价偏离均价 > 0.20元（价格确实在均线上方，过滤假冲高）
-    4. 成交额 ≥ 4000万（v16.5提升）
+    4. 成交额 ≥ 4000万（v17.0提升）
     5. 收盘价 < BOLL上轨（已从上轨回落）
     6. BOLL带宽 > 1.5元（防窄幅震荡）
-    7. 时间在 9:40 ~ 14:00（v16.5延长）
+    7. 时间在 9:40 ~ 14:00（v17.0延长）
 
     参数：
     - day_high: 当天从开盘到当前的盘中最高价（由主循环传入）
@@ -249,14 +249,14 @@ def check_pullback_sell_signal(df, current_idx, logger, day_high=0, config=None)
     h, m = get_time_tuple(time_str)
     in_time_window = (config['PULLBACK_START'] <= (h, m) <= config['PULLBACK_END'])
 
-    # v16.5 冲高回落条件（7个条件）
+    # v17.0 冲高回落条件（7个条件）
     cond1 = high_diff_from_avg > config['PULLBACK_DAY_HIGH_DEVIATION']  # 盘中最高偏离均价>0.20元
-    cond2 = pullback_from_high > config['PULLBACK_PULLBACK_FROM_HIGH']   # 从最高回落>0.15元(v16.5收紧)
+    cond2 = pullback_from_high > config['PULLBACK_PULLBACK_FROM_HIGH']   # 从最高回落>0.15元(v17.0收紧)
     cond3 = close_diff > config['PULLBACK_CLOSE_ABOVE_AVG']              # 收盘偏离均价>0.20元
-    cond4 = amount_wan >= config['PULLBACK_AMOUNT_THRESH_WAN']           # 成交额≥4000万(v16.5提升)
+    cond4 = amount_wan >= config['PULLBACK_AMOUNT_THRESH_WAN']           # 成交额≥4000万(v17.0提升)
     cond5 = price < boll_upper                                  # 已从BOLL上轨回落
     cond6 = boll_width > config['PULLBACK_BANDWIDTH_THRESH']         # BOLL带宽>1.5元（防窄幅震荡）
-    cond7 = in_time_window                                      # 时间窗口9:40-14:00(v16.5延长)
+    cond7 = in_time_window                                      # 时间窗口9:40-14:00(v17.0延长)
 
     details['满足条件'] = {
         f'盘中最高偏离均价>{config["PULLBACK_DAY_HIGH_DEVIATION"]}({high_diff_from_avg:+.3f})': cond1,
