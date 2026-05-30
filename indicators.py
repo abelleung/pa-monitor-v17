@@ -9,6 +9,7 @@ from datetime import datetime
 
 # ==================== 策略参数配置（集中管理，支持配置文件覆盖）====================
 # v16.1.2: 所有策略常量集中到此字典，从 monitor_config.json 的 strategy 节可覆盖
+# ⚠️ 键名必须与 strategies.py 和 pa_monitor.py 中的引用完全一致！
 STRATEGY_CONFIG = {
     # v14.0 BOLL上轨补充策略参数（降级为补充策略）v16.5更新
     'BOLL_AMOUNT_THRESH_WAN': 3000,
@@ -73,6 +74,9 @@ STRATEGY_CONFIG = {
     'EXTREME_LOW_LINE': 1250,
     'EXTREME_LOW_TARGET': 0.15,
 }
+
+
+
 
 # CUM_RATIO_TABLE (moved from pa_monitor.py)
 CUM_RATIO_TABLE = {
