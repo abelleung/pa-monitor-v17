@@ -6,7 +6,7 @@ set -e
 
 SERVER="pa-cloud"
 REMOTE_DIR="/opt/pa-monitor"
-FILES="pa_monitor.py pa_notify.py daily_report_enhanced.py monitor_config.json fetch_and_sync_1min.py"
+FILES="pa_monitor.py pa_notify.py indicators.py strategies.py monitor_config.json daily_report_enhanced.py fetch_and_sync_1min.py"
 
 echo "=== 盯盘系统一键部署 ==="
 echo "目标: $SERVER:$REMOTE_DIR"
