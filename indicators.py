@@ -116,7 +116,7 @@ def get_time_tuple(time_str):
 def is_trade_time(time_str):
     """判断是否在交易窗口内 (09:40 ~ 14:30)"""
     h, m = get_time_tuple(time_str)
-    return (h, m) >= STRATEGY_CONFIG['TRADE_START'] and (h, m) <= STRATEGY_CONFIG['TRDE_END']
+    return (h, m) >= STRATEGY_CONFIG['TRADE_START'] and (h, m) <= STRATEGY_CONFIG['TRADE_END']
 
 
 # ==================== 技术指标计算 ====================
