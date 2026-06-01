@@ -1028,7 +1028,7 @@ class PAMonitor:
             f"🐷 肥洪量化 v17.0 监控已启动\n"
             f"📊 股票：中国平安 (601318)\n"
             f"⏰ 监控时段：09:40 ~ 14:30\n"
-            f"🎯 目标差价：{TARGET_DIFF}元\n"
+            f"🎯 目标差价：{STRATEGY_CONFIG['TARGET_DIFF_NORMAL']}元（正常）/ {STRATEGY_CONFIG['TARGET_DIFF_LOW_VOLUME']}元（缩量）\n"
             f"📈 策略：动量(主)+BOLL(补)+冲高回落 → 倒T卖出 + 正T买入(极低位91%)\n"
             f"🔄 正T/倒T独立运行，互不阻塞\n"
             f"📋 评估：90分钟窗口（止损不终止追踪，窗口到期自动评估信号成败）\n\n"
