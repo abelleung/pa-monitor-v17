@@ -2107,10 +2107,12 @@ class PAMonitor:
                 in_trade_window = is_trade_time(latest_time)
 
                 # 倒T卖出后追踪（不限时间窗口）
-                self.check_buyback_and_stoploss(current_price, latest_time, total_bars=len(df))
+                if self.sell_active:
+                    self.check_buyback_and_stoploss(current_price, latest_time, total_bars=len(df))
 
                 # 正T买入后追踪（不限时间窗口）
-                self.check_zhengt_sell_and_stoploss(current_price, latest_time, total_bars=len(df))
+                if self.zhengt_buy_active:
+                    self.check_zhengt_sell_and_stoploss(current_price, latest_time, total_bars=len(df))
 
                 if not in_trade_window:
                     time.sleep(check_interval)
