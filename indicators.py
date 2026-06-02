@@ -258,6 +258,44 @@ def calc_indicators(df):
     df['BOLL带宽'] = boll_width
     df['买卖力道'] = maimai
 
+    # ===== 九转指标（TD Sequential）===
+    c = df['收盘'].values.astype(float)
+    n = len(c)
+
+    # 上涨九转：连续9根满足 C(n) > REF(C,4)
+    df['上涨九转'] = 0
+    up_cnt = 0
+    for i in range(n):
+        if i < 4:
+            continue
+        if c[i] > c[i-4]:  # 满足条件
+            if up_cnt > 0:
+                up_cnt += 1
+            else:
+                up_cnt = 1
+            if up_cnt > 9:
+                up_cnt = 9
+        else:  # 作废！
+            up_cnt = 0
+        df.iloc[i, df.columns.get_loc('上涨九转')] = up_cnt
+
+    # 下跌九转：连续9根满足 C(n) < REF(C,4)
+    df['下跌九转'] = 0
+    down_cnt = 0
+    for i in range(n):
+        if i < 4:
+            continue
+        if c[i] < c[i-4]:  # 满足条件
+            if down_cnt > 0:
+                down_cnt += 1
+            else:
+                down_cnt = 1
+            if down_cnt > 9:
+                down_cnt = 9
+        else:  # 作废！
+            down_cnt = 0
+        df.iloc[i, df.columns.get_loc('下跌九转')] = down_cnt
+
     df.drop(columns=['日期', '累计成交额', '累计成交量'], inplace=True)
     return df
 

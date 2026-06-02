@@ -183,6 +183,8 @@ def notify(title: str, body: str, level: str = "signal", color: str = None):
         "signal": "alarm",    # 通用信号：普通警报（向后兼容）
         "error": "glass",     # 错误：玻璃破碎声
         "heartbeat": "",      # 心跳：静音
+        "manual_daot": "boo",  # 人工股感倒T：低音铃声
+        "manual_zhengt": "dinger", # 人工股感正T：叮当声
         "info": "default",    # 日常：默认声音
     }.get(level, "default")
     

@@ -230,6 +230,8 @@ from strategies import (
     check_momentum_sell_signal,
     check_zhengT_buy_signal,
     check_pullback_sell_signal,
+    check_manual_daot_signal_v3,
+    check_manual_zhengT_signal_v3,
 )
 
 try:
@@ -716,6 +718,10 @@ class PAMonitor:
             self.tdx = None
             self._load_simulate_data()
         self.last_signal_bar = -STRATEGY_CONFIG['COOLDOWN_BARS'] - 1
+        self.last_zhengt_signal_bar = 0
+        # 人工股感策略独立冷却期
+        self.last_manual_daot_bar = -999
+        self.last_manual_zhengt_bar = -999
         self.signal_count_today = 0
         self.running = True
         self.daily_report_sent = False  # v11.0: 防止重复发日报
@@ -1478,6 +1484,22 @@ class PAMonitor:
             boll_triggered, boll_details = check_boll_sell_signal(
                 completed, self.logger, day_high=self.daily_stats.get('high_price', 0))
 
+        # 策略2.5: 人工股感倒T策略（v3，独立触发，不互斥）
+        manual_daot_triggered = False
+        manual_daot_details = None
+        # 独立触发：不受其他策略影响，也不受冷却期阻塞
+        if total_bars >= 5:
+            hist_df = df.iloc[max(0, total_bars-240):total_bars]
+        else:
+            hist_df = df.iloc[:total_bars]
+        manual_daot_triggered, manual_daot_details, manual_score = check_manual_daot_signal_v3(
+            completed, hist_df, logger=self.logger,
+            last_signal_bar=-999  # 独立冷却期：用单独的 last_manual_daot_bar
+        )
+        # 独立冷却期跟踪
+        if manual_daot_triggered:
+            self.last_manual_daot_bar = total_bars - 1
+
         # 策略3: 冲高回落策略（低波动日备用，仅前两个策略都未触发时检查）
         current_bandwidth = safe_float(completed['BOLL带宽'])
         is_low_volatility = current_bandwidth < STRATEGY_CONFIG['PULLBACK_BANDWIDTH_THRESH']
@@ -1490,14 +1512,17 @@ class PAMonitor:
             if pullback_triggered:
                 self.logger.info(f"📉 低波动日启用冲高回落策略 (带宽={current_bandwidth:.2f}元 < {STRATEGY_CONFIG['PULLBACK_BANDWIDTH_THRESH']}元)")
 
-        # 确定最终触发策略
-        triggered = momentum_triggered or boll_triggered or pullback_triggered
+        # 确定最终触发策略（包含人工股感倒T）
+        triggered = momentum_triggered or boll_triggered or pullback_triggered or manual_daot_triggered
         if momentum_triggered:
             details = momentum_details
             strategy_type = '动量策略'
         elif boll_triggered:
             details = boll_details
             strategy_type = 'BOLL补充'
+        elif manual_daot_triggered:
+            details = manual_daot_details
+            strategy_type = '人工股感倒T'
         else:
             details = pullback_details
             strategy_type = '冲高回落'
@@ -1563,9 +1588,30 @@ class PAMonitor:
         zhengt_triggered, zhengt_details = check_zhengT_buy_signal(
             completed, self.logger, amplitude=current_amplitude, boll_width_pct=boll_width_pct)
 
-        return zhengt_triggered, zhengt_details
+        # 人工股感正T策略（v3，方案A+九转硬约束）
+        manual_zhengt_triggered = False
+        manual_zhengt_details = None
+        # 人工股感正T策略（v3，独立触发，不互斥）
+        manual_zhengt_triggered = False
+        manual_zhengt_details = None
+        # 独立触发：不受官方正T影响
+        if total_bars >= 5:
+            hist_df = df.iloc[max(0, total_bars-240):total_bars]
+        else:
+            hist_df = df.iloc[:total_bars]
+        manual_zhengt_triggered, manual_zhengt_details, manual_zhengt_score = check_manual_zhengT_signal_v3(
+            completed, hist_df, logger=self.logger,
+            last_signal_bar=-999  # 独立冷却期
+        )
+        # 独立冷却期跟踪
+        if manual_zhengt_triggered:
+            self.last_manual_zhengt_bar = total_bars - 1
+            return True, manual_zhengt_details
+        return zhengt_triggered or manual_zhengt_triggered, manual_zhengt_details if manual_zhengt_triggered else zhengt_details
 
     def _send_heartbeat(self, now, df):
+        h, m = now.hour, now.minute
+        h, m = now.hour, now.minute
         """
         构建并发送心跳（从 run() 提取，便于独立维护）
         包含：时机判断、缓存指标展示、实时预估计算、90分钟窗口倒计时、通知发送
@@ -1658,9 +1704,18 @@ class PAMonitor:
                     # 信号检查（复用现有逻辑）
                     total_bars = len(df)
                     if total_bars >= 5:
-                        self.logger.info(f"DEBUG: 检查信号 bar={bar_time}, 收盘={completed['收盘']:.2f}, 涨跌={completed.get('涨跌', 0):.1f}, 风险={completed.get('风险', 0):.1f}")
-                        self._check_daot_signals(df, completed, total_bars)
-                        self._check_zhengt_signals(df, completed, total_bars)
+                        # 安全获取涨跌和风险（避免None比较）
+                        _zhangdie = completed.get('涨跌', 0)
+                        _fengxian = completed.get('风险', 0)
+                        if _zhangdie is None: _zhangdie = 0
+                        if _fengxian is None: _fengxian = 0
+                        self.logger.info(f"DEBUG: 检查信号 bar={bar_time}, 收盘={completed['收盘']:.2f}, 涨跌={_zhangdie:.1f}, 风险={_fengxian:.1f}")
+                        self._check_daot_signals(df, completed, total_bars)  # 官方三策略检查
+                        # 正T检查（包含官方正T和人工正T）
+                        zt_triggered, zt_details = self._check_zhengt_signals(df, completed, total_bars)
+                        if zt_triggered:
+                            # 处理正T买入（官方或人工）
+                            self._handle_zhengt_trigger(zt_details, completed, total_bars)
                         self.check_buyback_and_stoploss(completed['收盘'], bar_time, total_bars)
                         self.check_zhengt_sell_and_stoploss(completed['收盘'], bar_time, total_bars)
 
@@ -2230,7 +2285,7 @@ class PAMonitor:
                         ]
                         cond_marks = ["✅" if c else "❌" for c in details.get('满足条件', {}).values()]
                         strategy_badge = "📉 冲高回落v17.0（低波动日）"
-                    
+
                     sell_price = details.get('价格', 0)
                     msg = (
                         f"{strategy_badge}\n"
@@ -2248,7 +2303,41 @@ class PAMonitor:
                     self.logger.info(f"🚨 卖出信号！{strategy_type} {details.get('时间', '')} 价格={sell_price} "
                                     f"成交额={details.get('成交额万', 0):.0f}万")
 
-                    notify(f"🚨 中国平安 — {strategy_type}卖出信号！", msg, level="sell")
+                    # 人工股感倒T 用不同声音（boo低音铃声）
+                    if strategy_type == '人工股感倒T':
+                        score = manual_score if 'manual_score' in dir() else 0
+                        cond_labels = [
+                            f"成交额 {details.get('成交额万', 0):.0f}万 ≥ 3000万",
+                            f"风险+涨跌={details.get('涨跌+风险', 0):.0f} > 184",
+                            f"价格{details.get('价格', 0):.2f} > 均价{details.get('均价', 0):.2f}",
+                            f"上涨九转第{details.get('上涨九转计数', 0)}根",
+                            f"BOLL触碰 {'✅' if details.get('BOLL触碰', False) else '❌'}",
+                        ]
+                        cond_marks = ["✅" if c else "❌" for c in [True, True, True, details.get('上涨九转计数', 0)==9, details.get('BOLL触碰', False)]]
+                        strategy_badge = "📊 人工股感倒T（v3）"
+
+                    sell_price = details.get('价格', 0)
+                    msg = (
+                        f"{strategy_badge}\n"
+                        f"{details.get('时间', '')}  触发卖出信号！\n\n"
+                        f"当前指标：\n"
+                        f"{'  '.join([f'{m} {l}' for m, l in zip(cond_marks, cond_labels)])}\n\n"
+                        f"卖出参考价: {sell_price}元\n"
+                        f"建议挂买单: {self.target_buy_price}元（目标差价{self.current_target_diff}元）\n"
+                        f"止损买回价: {self.stop_loss_price}元（止损差价{self.current_stop_loss_diff}元）"
+                        f"{est_signal_info}\n\n"
+                        f"请打开同花顺 App 操作！\n"
+                        f"卖出后会持续监控，到价自动提醒买回！"
+                    )
+
+                    self.logger.info(f"🚨 卖出信号！{strategy_type} {details.get('时间', '')} 价格={sell_price} "
+                                    f"成交额={details.get('成交额万', 0):.0f}万")
+
+                    # 人工股感倒T 用不同声音（boo低音铃声）
+                    if strategy_type == '人工股感倒T':
+                        notify(f"📊 中国平安 — 人工股感倒T卖出！", msg, level="manual_daot")
+                    else:
+                        notify(f"🚨 中国平安 — {strategy_type}卖出信号！", msg, level="sell")
 
                     # 写入信号历史（供网站API读取）
                     save_signal_to_history({
@@ -2286,8 +2375,45 @@ class PAMonitor:
                                 f"MACD={boll_details.get('MACD柱', 0):.4f}"
                             )
 
-                # 正T买入信号处理
-                if zhengt_triggered and zhengt_details:
+                # 正T买入信号处理（官方或人工）
+                if manual_zhengt_triggered and manual_zhengt_details:
+                    # 人工正T：用不同emoji和bark声音（dinger）
+                    self.zhengt_signal_count_today += 1
+                    self.last_manual_zhengt_bar = total_bars - 1
+
+                    self.zhengt_buy_active = True
+                    zhengt_price = manual_zhengt_details.get('价格', 0)
+                    self.zhengt_buy_price = zhengt_price
+                    self.zhengt_window_max_price = None
+                    self.zhengt_buy_time = manual_zhengt_details.get('时间', '')
+                    self.zhengt_target_sell_price = round(zhengt_price + 0.20, 2)  # 人工正T用0.20目标
+                    self.zhengt_stop_loss_price = round(zhengt_price - 0.15, 2)
+                    self.zhengt_sell_notified = False
+                    self.zhengt_stop_loss_triggered = False
+                    self.zhengt_signal_bar = total_bars - 1
+                    self.zhengt_eval_notified = False
+
+                    # 人工正T推送（🎵 + dinger声音）
+                    manual_zhengt_msg = (
+                        f"🎵 人工股感正T买入信号！\n\n"
+                        f"{manual_zhengt_details.get('时间', '')}  触发买入信号！\n\n"
+                        f"当前指标：\n"
+                        f"  成交额 {manual_zhengt_details.get('成交额万', 0):.0f}万 ≥ 3000万 ✅\n"
+                        f"  风险+涨跌={manual_zhengt_details.get('涨跌+风险', 0):.0f} < 10 ✅\n"
+                        f"  价格{manual_zhengt_details.get('价格', 0):.2f} < 均价{manual_zhengt_details.get('均价', 0):.2f} ✅\n"
+                        f"  下跌九转第{manual_zhengt_details.get('下跌九转计数', 0)}根 ✅\n"
+                        f"  BOLL触碰 {'✅' if manual_zhengt_details.get('BOLL触碰', False) else '❌'}\n\n"
+                        f"买入参考价: {zhengt_price}元\n"
+                        f"建议挂卖单: {self.zhengt_target_sell_price}元（目标差价0.20元）\n"
+                        f"止损卖出价: {self.zhengt_stop_loss_price}元（止损差价0.15元）\n\n"
+                        f"请打开同花顺 App 操作！\n"
+                        f"买入后会持续监控，到价自动提醒卖出！"
+                    )
+                    self.logger.info(f"🎵 人工股感正T买入！{manual_zhengt_details.get('时间', '')} 价格={zhengt_price} "
+                                        f"成交额={manual_zhengt_details.get('成交额万', 0):.0f}万")
+                    notify("🎵 中国平安 — 人工股感正T买入！", manual_zhengt_msg, level="manual_zhengt")
+
+                elif zhengt_triggered and zhengt_details:
                     self.zhengt_signal_count_today += 1
                     self.last_zhengt_signal_bar = total_bars - 1
 

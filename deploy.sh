@@ -6,11 +6,12 @@ set -e
 
 SERVER="pa-cloud"
 REMOTE_DIR="/opt/pa-monitor"
-FILES="pa_monitor.py pa_notify.py indicators.py strategies.py monitor_config.json daily_report_enhanced.py fetch_and_sync_1min.py"
+
+# 存在的文件列表
+FILES="pa_monitor.py pa_notify.py indicators.py strategies.py manual_strategy_v2.py monitor_config.json setup_monitor.sh monitor_healthcheck.sh"
 
 echo "=== 盯盘系统一键部署 ==="
 echo "目标: $SERVER:$REMOTE_DIR"
-echo ""
 
 # 1. 上传文件
 echo "[1/4] 上传代码文件..."
@@ -20,8 +21,8 @@ echo "✅ 上传完成"
 # 2. 更新systemd服务描述版本号
 echo "[2/4] 更新systemd服务描述..."
 # 从pa_monitor.py提取版本号
-VERSION=$(head -1 pa_monitor.py | grep -o 'v[0-9.]*' || echo "v16.1.2")
-ssh $SERVER "sed -i 's/中国平安盯盘系统 v[^\"]*/中国平安盯盘系统 ${VERSION}/' /etc/systemd/system/pa-monitor.service && systemctl daemon-reload && echo '✅ systemd描述已更新为 ${VERSION}'"
+VERSION=$(head -1 pa_monitor.py | grep -o 'v[0-9.]*' || echo "v17.1")
+ssh $SERVER "sed -i 's/中国平安盯盘系统 [^\"]*/中国平安盯盘系统 ${VERSION}/' /etc/systemd/system/pa-monitor.service && systemctl daemon-reload && echo '✅ systemd描述已更新为 ${VERSION}'"
 
 # 3. 清除matplotlib缓存（字体变更后需要）
 echo "[3/4] 清除matplotlib缓存..."
