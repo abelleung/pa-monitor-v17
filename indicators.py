@@ -188,26 +188,24 @@ def calc_indicators(df):
     l = df['最低'].values.astype(float)
     n = len(c)
 
-    # === 涨跌指标 ===
+    # === 涨跌指标（同花顺公式）===
     llv27 = llv(l, 27); hv27 = hhv(h, 27)
     raw27 = np.full(n, np.nan)
     for i in range(n):
         denom = hv27[i] - llv27[i]
         if denom > 0: raw27[i] = (c[i] - llv27[i]) / denom * 100
-    fast27 = sma_wilder(raw27, 5, 1); slow27 = sma_wilder(fast27, 5, 1)
-    diff27 = fast27 * 3 - slow27 * 2
-    zhangdie = ma_simple(sma_wilder(diff27, 3, 1), 5)
+    fast27 = sma_wilder(raw27, 5, 1)          # 快线：SMA(5,1)
+    slow27 = sma_wilder(fast27, 3, 1)        # 慢线：SMA(3,1)
+    diff27 = fast27 * 3 - slow27 * 2            # 差值：3*快 - 2*慢
+    zhangdie = ma_simple(diff27, 5)               # 最终：MA(5)
 
-    # === 风险指标（v11.0: 加max(0,...)保护，防止负数） ===
+        # === 风险指标（同花顺公式）===
     llv21 = llv(l, 21); hv21 = hhv(h, 21)
     var8 = np.full(n, np.nan)
     for i in range(n):
         denom = hv21[i] - llv21[i]
         if denom > 0: var8[i] = (c[i] - llv21[i]) / denom * 100
-    rs = sma_wilder(var8, 13, 8); rs_slow = sma_wilder(rs, 13, 8)
-    var9 = rs * 3 - rs_slow * 2
-    fengxian_raw = sma_wilder(var9, 13, 8)
-    fengxian = np.ceil(np.maximum(fengxian_raw, 0))  # v11.0: 防止负数
+    fengxian = np.ceil(sma_wilder(var8, 13, 8))  # 同花顺：直接SMA(var8, 13, 8)
 
     # === MACD (12,26,9) ===
     ema_fast = ema(c, 12)
