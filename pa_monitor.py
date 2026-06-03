@@ -1606,7 +1606,9 @@ class PAMonitor:
         # 独立冷却期跟踪
         if manual_zhengt_triggered:
             self.last_manual_zhengt_bar = total_bars - 1
-            return True, manual_zhengt_details
+        # 保存 manual_zhengt_triggered 到 self，供 run() 使用
+        self._manual_zhengt_triggered = manual_zhengt_triggered
+        self._manual_zhengt_details = manual_zhengt_details
         return zhengt_triggered or manual_zhengt_triggered, manual_zhengt_details if manual_zhengt_triggered else zhengt_details
 
     def _send_heartbeat(self, now, df):
@@ -2376,16 +2378,17 @@ class PAMonitor:
                             )
 
                 # 正T买入信号处理（官方或人工）
-                if manual_zhengt_triggered and manual_zhengt_details:
+                # 使用 self._manual_zhengt_triggered 代替局部变量
+                if hasattr(self, '_manual_zhengt_triggered') and self._manual_zhengt_triggered and self._manual_zhengt_details:
                     # 人工正T：用不同emoji和bark声音（dinger）
                     self.zhengt_signal_count_today += 1
                     self.last_manual_zhengt_bar = total_bars - 1
 
                     self.zhengt_buy_active = True
-                    zhengt_price = manual_zhengt_details.get('价格', 0)
+                    zhengt_price = self._manual_zhengt_details.get('价格', 0)
                     self.zhengt_buy_price = zhengt_price
                     self.zhengt_window_max_price = None
-                    self.zhengt_buy_time = manual_zhengt_details.get('时间', '')
+                    self.zhengt_buy_time = self._manual_zhengt_details.get('时间', '')
                     self.zhengt_target_sell_price = round(zhengt_price + 0.20, 2)  # 人工正T用0.20目标
                     self.zhengt_stop_loss_price = round(zhengt_price - 0.15, 2)
                     self.zhengt_sell_notified = False
@@ -2396,21 +2399,21 @@ class PAMonitor:
                     # 人工正T推送（🎵 + dinger声音）
                     manual_zhengt_msg = (
                         f"🎵 人工股感正T买入信号！\n\n"
-                        f"{manual_zhengt_details.get('时间', '')}  触发买入信号！\n\n"
+                        f"{self._manual_zhengt_details.get('时间', '')}  触发买入信号！\n\n"
                         f"当前指标：\n"
-                        f"  成交额 {manual_zhengt_details.get('成交额万', 0):.0f}万 ≥ 3000万 ✅\n"
-                        f"  风险+涨跌={manual_zhengt_details.get('涨跌+风险', 0):.0f} < 10 ✅\n"
-                        f"  价格{manual_zhengt_details.get('价格', 0):.2f} < 均价{manual_zhengt_details.get('均价', 0):.2f} ✅\n"
-                        f"  下跌九转第{manual_zhengt_details.get('下跌九转计数', 0)}根 ✅\n"
-                        f"  BOLL触碰 {'✅' if manual_zhengt_details.get('BOLL触碰', False) else '❌'}\n\n"
+                        f"  成交额 {self._manual_zhengt_details.get('成交额万', 0):.0f}万 ≥ 3000万 ✅\n"
+                        f"  风险+涨跌={self._manual_zhengt_details.get('涨跌+风险', 0):.0f} < 10 ✅\n"
+                        f"  价格{self._manual_zhengt_details.get('价格', 0):.2f} < 均价{self._manual_zhengt_details.get('均价', 0):.2f} ✅\n"
+                        f"  下跌九转第{self._manual_zhengt_details.get('下跌九转计数', 0)}根 ✅\n"
+                        f"  BOLL触碰 {'✅' if self._manual_zhengt_details.get('BOLL触碰', False) else '❌'}\n\n"
                         f"买入参考价: {zhengt_price}元\n"
                         f"建议挂卖单: {self.zhengt_target_sell_price}元（目标差价0.20元）\n"
                         f"止损卖出价: {self.zhengt_stop_loss_price}元（止损差价0.15元）\n\n"
                         f"请打开同花顺 App 操作！\n"
                         f"买入后会持续监控，到价自动提醒卖出！"
                     )
-                    self.logger.info(f"🎵 人工股感正T买入！{manual_zhengt_details.get('时间', '')} 价格={zhengt_price} "
-                                        f"成交额={manual_zhengt_details.get('成交额万', 0):.0f}万")
+                    self.logger.info(f"🎵 人工股感正T买入！{self._manual_zhengt_details.get('时间', '')} 价格={zhengt_price} "
+                                        f"成交额={self._manual_zhengt_details.get('成交额万', 0):.0f}万")
                     notify("🎵 中国平安 — 人工股感正T买入！", manual_zhengt_msg, level="manual_zhengt")
 
                 elif zhengt_triggered and zhengt_details:
