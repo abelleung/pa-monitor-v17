@@ -954,6 +954,9 @@ class PAMonitor:
         """等待开盘（09:25 开始准备，自动跳过节假日）"""
         while self.running:
             now = datetime.now()
+            # v17.1 FIX: 每次循环开始初始化人工正T状态（防止局部变量未定义）
+            self._manual_zhengT_triggered = False
+            self._manual_zhengT_details = None
 
             if not self.is_trading_day():
                 self.logger.info(f"今天 {now.strftime('%Y-%m-%d')} 非交易日，休眠中...")
